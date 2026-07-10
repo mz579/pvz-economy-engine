@@ -1,0 +1,10 @@
+version: 3.8
+services:
+  pvz-engine:
+    build: .
+    ports:
+      - 8501:8501
+    volumes:
+      - ./data:/app/data
+    environment:
+      - PVZ_DATA_SOURCE=local_csv

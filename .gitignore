@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+venv/
+.vscode/
+.idea/
+*.log
+*.pid
+data/processed/
+data/beijing/
+data/shouguang/
+Thumbs.db
+.DS_Store
+.streamlit/
