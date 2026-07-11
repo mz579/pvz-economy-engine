@@ -169,7 +169,7 @@ def calc_deviation(
     # 以豌豆射手为基准计算理论价格
     base_row = result[result["plant"] == "豌豆射手"]
     if base_row.empty:
-        return result
+        base_row = result.iloc[[0]]
 
     base_price = base_row["market_price"].values[0]
     base_utility = base_row["utility"].values[0]

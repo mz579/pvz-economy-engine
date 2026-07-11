@@ -10,3 +10,9 @@ from src.adapters.xinfadi_spider import XinfadiSpider
 from src.adapters.local_csv_loader import LocalCSVLoader
 
 __all__ = ["BaseSpider", "XinfadiSpider", "LocalCSVLoader"]
+
+from src.adapters.shouguang_spider import ShouguangSpider
+from src.adapters.guangzhou_spider import GuangzhouSpider
+from src.adapters.custom_upload_adapter import CustomUploadAdapter
+
+__all__ = ["BaseSpider", "XinfadiSpider", "LocalCSVLoader", "ShouguangSpider", "GuangzhouSpider", "CustomUploadAdapter"]

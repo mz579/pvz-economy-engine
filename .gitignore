@@ -9,7 +9,11 @@ venv/
 *.pid
 data/processed/
 data/beijing/
-data/shouguang/
+data/shouguang/*
+!data/shouguang/*.csv
+data/guangzhou/*
+!data/guangzhou/*.csv
+!data/fallback/*.csv
 Thumbs.db
 .DS_Store
 .streamlit/

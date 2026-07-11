@@ -8,14 +8,14 @@ import sys; sys.path.insert(0, '.')
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Callable, Any
-from src.optimizer import _core_solve, solve
+from src.optimizer import solve
 
 
 def _peashooter_strategy(plants, available_sun, available_cells, budget, zf, dd):
     """Baseline: always plant Peashooters when possible."""
     peashooter = [p for p in plants if p['name'] == '豌豆射手']
     if not peashooter:
-        return _core_solve(plants, available_sun, available_cells, budget, zf, dd)
+        return solve(plants, available_sun, available_cells, budget, zombie_factor=zf, deviation_data=dd)
     ps = peashooter[0]
     max_ct = min(8, available_cells)
     if ps['sun_cost'] > 0:
