@@ -20,6 +20,7 @@ TOP_LEVEL_FILES = (
     "start_unix.sh",
 )
 INCLUDED_DIRECTORIES = (
+    ".streamlit",
     "assets",
     "src",
     "data/fallback",

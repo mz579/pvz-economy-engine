@@ -20,4 +20,4 @@ echo "[2/3] 正在检查运行依赖，第一次启动可能需要几分钟..."
 python -m pip install -r requirements.txt
 
 echo "[3/3] 正在启动末日菜园，浏览器会自动打开..."
-python -m streamlit run app.py --server.address localhost
+python -m streamlit run app.py --server.address localhost --server.showEmailPrompt false --browser.gatherUsageStats false

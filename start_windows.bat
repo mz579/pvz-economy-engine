@@ -35,7 +35,7 @@ if not errorlevel 1 goto dependencies_ready
 
 echo Installing dependencies. On a slow network this may take 5-15 minutes...
 >> "%LOG_FILE%" echo Installing requirements.txt
-"%VENV_PYTHON%" -m pip install --disable-pip-version-check -r "requirements.txt"
+"%VENV_PYTHON%" -m pip install --quiet --progress-bar on --disable-pip-version-check -r "requirements.txt"
 if errorlevel 1 goto install_failed
 
 :dependencies_ready
@@ -45,7 +45,7 @@ echo Keep this window open while using the app.
 echo Local URL: http://localhost:8501
 >> "%LOG_FILE%" echo Starting Streamlit at http://localhost:8501
 set "STREAMLIT_BROWSER_GATHER_USAGE_STATS=false"
-"%VENV_PYTHON%" -m streamlit run "app.py" --server.address localhost
+"%VENV_PYTHON%" -m streamlit run "app.py" --server.address localhost --server.showEmailPrompt false --browser.gatherUsageStats false >> "%LOG_FILE%" 2>&1
 set "APP_EXIT=%ERRORLEVEL%"
 if not "%APP_EXIT%"=="0" goto app_failed
 

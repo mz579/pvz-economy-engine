@@ -1,6 +1,6 @@
-# 末日菜园作战室 V2.0.1
+# 末日菜园作战室 V2.0
 
-Windows 启动补丁版。解压后按照 `README_FIRST.txt` 启动即可。
+V2.0 本地启动体验补丁。解压后按照 `README_FIRST.txt` 启动即可。
 
 ## Windows 启动修复
 
@@ -8,6 +8,8 @@ Windows 启动补丁版。解压后按照 `README_FIRST.txt` 启动即可。
 - 兼容检测 `py` / `python`，已安装的依赖不再每次重复安装；
 - 启动失败时保留窗口，并生成 `startup.log`；
 - 发布包中的批处理强制使用 Windows CRLF 换行。
+- 跳过 Streamlit 首次运行的邮箱询问，并关闭匿名使用统计；
+- 服务仅监听本机 `localhost`，启动后直接打开本地页面。
 
 ## V2.0 功能
 
