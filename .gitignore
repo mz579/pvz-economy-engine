@@ -2,18 +2,26 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .eggs/
+.pytest_cache/
+.coverage
+
+.venv/
 venv/
 .vscode/
 .idea/
+.streamlit/
+
 *.log
 *.pid
-data/processed/
-data/beijing/
-data/shouguang/*
-!data/shouguang/*.csv
-data/guangzhou/*
-!data/guangzhou/*.csv
-!data/fallback/*.csv
 Thumbs.db
 .DS_Store
-.streamlit/
+
+# V2.0 data workflow: keep contracts, ignore generated/local payloads.
+data/raw/*
+!data/raw/README.md
+data/processed/*
+!data/processed/README.md
+data/custom/
+
+# Legacy cache path kept out of version control during migration.
+data/beijing/
