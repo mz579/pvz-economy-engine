@@ -206,7 +206,7 @@ def main() -> None:
             """
             <div class="sidebar-note">
               <strong>离线可运行</strong>
-              <span>当前使用仓库内 CSV 样例，不请求外部网站。</span>
+              <span>没有 processed 文件时会自动使用仓库内 CSV fallback 生成。</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -259,7 +259,12 @@ def main() -> None:
         )
         st.caption(f"{selected_vegetable} · 单位：元/kg · 来源：{model['data_source']}")
     with chart_right:
-        top_ranking = model["ranking"].head(10).set_index("name")[["apocalypse_index"]]
+        top_ranking = (
+            model["ranking"]
+            .head(10)
+            .set_index("name")[["apocalypse_index"]]
+            .rename(columns={"apocalypse_index": "末日性价比指数"})
+        )
         st.bar_chart(top_ranking, height=310, **stretch_width(st.bar_chart))
         st.caption("Top 10 末日性价比指数；僵尸模式变化后自动重排。")
 

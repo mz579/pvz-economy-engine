@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.crawler import collect_price_data
+from src.crawler import CollectionResult, collect_price_data
 from src.features import FEATURE_COLUMNS, add_price_features
 from src.pipeline import run_data_pipeline
 from src.preprocess import STANDARD_COLUMNS, clean_price_data
@@ -86,10 +86,9 @@ class DataPipelineTests(unittest.TestCase):
     def test_offline_pipeline_generates_processed_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             folder = Path(temporary)
-            fallback = self._fallback_file(folder)
             artifacts = run_data_pipeline(
                 prefer_network=False,
-                fallback_path=fallback,
+                fallback_path=ROOT / "data" / "fallback" / "vegetable_prices.csv",
                 raw_path=folder / "raw.csv",
                 processed_path=folder / "processed.csv",
                 metadata_path=folder / "metadata.json",
@@ -105,6 +104,35 @@ class DataPipelineTests(unittest.TestCase):
         )
         self.assertEqual(written["source"].unique().tolist(), ["local_csv_fallback"])
         self.assertIn("volatility", written.columns)
+
+    def test_partial_online_sample_falls_back_for_mapping_coverage(self) -> None:
+        online = CollectionResult(
+            data=pd.DataFrame(
+                {
+                    "date": ["2026-07-13"],
+                    "name": ["豌豆"],
+                    "price": [5.0],
+                    "source": ["xinfadi_official"],
+                    "unit": ["元/kg"],
+                }
+            ),
+            source="xinfadi_official",
+            used_fallback=False,
+            message="fixture",
+            source_url="https://example.invalid",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            with patch("src.pipeline.collect_price_data", return_value=online):
+                artifacts = run_data_pipeline(
+                    prefer_network=True,
+                    raw_path=folder / "raw.csv",
+                    processed_path=folder / "processed.csv",
+                    metadata_path=folder / "metadata.json",
+                )
+
+        self.assertTrue(artifacts.collection.used_fallback)
+        self.assertEqual(artifacts.data["name"].nunique(), 15)
 
 
 if __name__ == "__main__":

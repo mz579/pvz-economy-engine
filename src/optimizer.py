@@ -19,7 +19,7 @@ except ImportError:  # pragma: no cover - covered through use_pulp=False tests
     pl = None
 
 
-SCORE_COLUMN_CANDIDATES = ("apocalypse_index", "score", "utility")
+SCORE_COLUMN_CANDIDATES = ("apocalypse_index", "score")
 SUPPORT_SCORE_THRESHOLD = 5
 
 
@@ -151,7 +151,7 @@ def _resolve_score_column(data: pd.DataFrame, requested: str | None) -> str:
         if candidate in data.columns:
             return candidate
     raise ValueError(
-        "植物数据缺少评分字段，需提供 apocalypse_index、score 或 utility"
+        "植物数据缺少评分字段，需提供 apocalypse_index 或 score"
     )
 
 
@@ -378,9 +378,7 @@ def _build_result(
         "strategy": dict(strategy),
         "combination": combination,
         "total_sun_cost": displayed_sun,
-        "total_cost": displayed_sun,
         "total_score": rounded_score,
-        "total_utility": rounded_score,
         "total_plants": total_plants,
         "score_column": score_column,
         "constraint_checks": checks,
@@ -389,50 +387,11 @@ def _build_result(
         "status": status,
         "method": method,
         "fallback_reason": fallback_reason,
-        # Temporary V1 UI compatibility; V2 no longer computes shadow prices.
-        "sun_shadow_price": 0.0,
-        "cell_shadow_price": 0.0,
-        "cost_shadow_price": 0.0,
     }
 
 
 def _display_number(value: float) -> int | float:
     return int(value) if float(value).is_integer() else round(float(value), 4)
-
-
-def solve(
-    plants: Sequence[Mapping[str, Any]],
-    available_sun: int = 150,
-    available_cells: int = 45,
-    budget: float | None = None,
-    zombie_factor: Mapping[str, float] | None = None,
-    deviation_data: Mapping[str, float] | None = None,
-) -> dict[str, Any]:
-    """Compatibility wrapper used by the legacy backtester."""
-
-    del budget, zombie_factor, deviation_data
-    return optimize_planting(
-        plants,
-        available_sun=available_sun,
-        available_cells=available_cells,
-    )
-
-
-def run_optimization(
-    df_plants: pd.DataFrame,
-    deviation_df: pd.DataFrame | None = None,
-    available_sun: int = 150,
-    available_cells: int = 45,
-    zombie_factor: Mapping[str, float] | None = None,
-) -> dict[str, Any]:
-    """Compatibility wrapper used by the current CLI and Streamlit page."""
-
-    del deviation_df, zombie_factor
-    return optimize_planting(
-        df_plants,
-        available_sun=available_sun,
-        available_cells=available_cells,
-    )
 
 
 def print_strategy(result: Mapping[str, Any]) -> None:

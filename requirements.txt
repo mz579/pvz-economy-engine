@@ -1,8 +1,5 @@
 # V2.0 core runtime. Keep this list small and explain new dependencies first.
 pandas>=2.0,<3.0
-numpy>=1.23,<3.0
 pulp>=2.7,<4.0
 streamlit>=1.28,<2.0
-matplotlib>=3.7,<4.0
 requests>=2.27,<3.0
-beautifulsoup4>=4.11,<5.0

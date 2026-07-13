@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src.pipeline import load_or_build_processed_prices
 from src.plant_mapping import REQUIRED_COLUMNS, link_plants_to_prices, load_plant_mapping
 
 
@@ -20,9 +21,7 @@ class PlantMappingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.mapping = load_plant_mapping()
-        cls.offline_prices = pd.read_csv(
-            ROOT / "data" / "fallback" / "vegetable_prices.csv"
-        )
+        cls.offline_prices = load_or_build_processed_prices()
 
     def test_mapping_has_required_schema_and_size(self) -> None:
         self.assertTrue(set(REQUIRED_COLUMNS).issubset(self.mapping.columns))
@@ -41,13 +40,12 @@ class PlantMappingTests(unittest.TestCase):
         self.assertTrue(linked["price"].notna().all())
 
     def test_mapping_accepts_v2_price_name_field(self) -> None:
-        v2_prices = self.offline_prices.rename(columns={"product": "name"})
-        linked = link_plants_to_prices(self.mapping, v2_prices)
+        linked = link_plants_to_prices(self.mapping, self.offline_prices)
         self.assertSetEqual(set(linked["name"]), set(self.mapping["name"]))
 
-    def test_legacy_columns_remain_available(self) -> None:
-        legacy_columns = {"hp", "special_tag", "category"}
-        self.assertTrue(legacy_columns.issubset(self.mapping.columns))
+    def test_strategy_metadata_remains_available(self) -> None:
+        strategy_columns = {"hp", "special_tag", "category"}
+        self.assertTrue(strategy_columns.issubset(self.mapping.columns))
 
 
 if __name__ == "__main__":

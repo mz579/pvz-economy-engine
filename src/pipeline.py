@@ -10,7 +10,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.crawler import DEFAULT_FALLBACK_PATH, CollectionResult, collect_price_data
+from src.crawler import (
+    DEFAULT_FALLBACK_PATH,
+    CollectionResult,
+    collect_price_data,
+    load_local_fallback,
+)
 from src.features import add_price_features
 from src.preprocess import clean_price_data
 
@@ -19,6 +24,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RAW_PATH = PROJECT_ROOT / "data" / "raw" / "latest_prices.csv"
 DEFAULT_METADATA_PATH = PROJECT_ROOT / "data" / "raw" / "latest_prices.metadata.json"
 DEFAULT_PROCESSED_PATH = PROJECT_ROOT / "data" / "processed" / "vegetable_prices.csv"
+DEFAULT_PLANT_PATH = PROJECT_ROOT / "data" / "plants.csv"
 
 
 @dataclass(frozen=True)
@@ -53,11 +59,32 @@ def run_data_pipeline(
         fallback_path=fallback_path,
         timeout=timeout,
     )
-    collection.data.to_csv(raw_target, index=False, encoding="utf-8-sig")
-
     cleaned = clean_price_data(collection.data)
     if cleaned.empty:
         raise ValueError("清洗后没有可用菜价记录")
+    required_names = _required_vegetable_names()
+    missing_names = required_names.difference(cleaned["name"].unique())
+    if missing_names and not collection.used_fallback:
+        online_source = collection.source
+        fallback_raw = load_local_fallback(fallback_path)
+        cleaned = clean_price_data(fallback_raw)
+        collection = CollectionResult(
+            data=fallback_raw,
+            source="local_csv_fallback",
+            used_fallback=True,
+            message=(
+                f"{online_source} 未覆盖映射蔬菜 "
+                f"{', '.join(sorted(missing_names))}，已回退本地 CSV。"
+            ),
+            source_url=str(Path(fallback_path)),
+        )
+    remaining_missing = required_names.difference(cleaned["name"].unique())
+    if remaining_missing:
+        raise ValueError(
+            f"菜价数据无法覆盖植物映射: {', '.join(sorted(remaining_missing))}"
+        )
+
+    collection.data.to_csv(raw_target, index=False, encoding="utf-8-sig")
     featured = add_price_features(cleaned, history_window=history_window)
     featured.to_csv(
         processed_target,
@@ -107,12 +134,18 @@ def load_or_build_processed_prices(
     data = pd.read_csv(target, parse_dates=["date"])
     required = {"date", "name", "price", "source", "historical_mean", "volatility"}
     missing = required.difference(data.columns)
-    if missing:
+    missing_names = _required_vegetable_names().difference(data.get("name", []))
+    if missing or missing_names:
         return run_data_pipeline(
             prefer_network=prefer_network,
             processed_path=target,
         ).data
     return data
+
+
+def _required_vegetable_names(path: Path | str = DEFAULT_PLANT_PATH) -> set[str]:
+    mapping = pd.read_csv(path, usecols=["vegetable_name"])
+    return set(mapping["vegetable_name"].dropna().astype(str).str.strip())
 
 
 def _build_parser() -> argparse.ArgumentParser:

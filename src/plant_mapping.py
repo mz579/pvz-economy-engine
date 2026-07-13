@@ -77,18 +77,13 @@ def link_plants_to_prices(
     *,
     require_all: bool = True,
 ) -> pd.DataFrame:
-    """Join plants to V2 ``name`` prices or the legacy ``product`` fallback.
-
-    The temporary ``product`` compatibility keeps this batch independently
-    testable before the batch-2 cleaner changes prices to the V2 field name.
-    """
+    """Join plants to cleaned V2 prices using the standard ``name`` field."""
 
     validate_plant_mapping(mapping)
-    price_name_column = "name" if "name" in prices.columns else "product"
-    if price_name_column not in prices.columns:
-        raise ValueError("菜价数据必须包含 name 字段（兼容旧 product 字段）")
+    if "name" not in prices.columns:
+        raise ValueError("菜价数据必须包含 V2 标准 name 字段")
 
-    price_data = prices.copy().rename(columns={price_name_column: "price_name"})
+    price_data = prices.copy().rename(columns={"name": "price_name"})
     price_data["price_name"] = price_data["price_name"].astype(str).str.strip()
     plant_data = mapping.copy()
     plant_data["vegetable_name"] = plant_data["vegetable_name"].str.strip()
