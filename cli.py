@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
 from src.dashboard import ZOMBIE_MODES, build_dashboard_model
 from src.optimizer import print_strategy
 from src.pipeline import DEFAULT_PROCESSED_PATH, run_data_pipeline
+from src.user_data import prepare_uploaded_price_data
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -31,6 +32,8 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="优先尝试北京新发地；失败时仍自动回退本地 CSV",
     )
+    parser.add_argument("--csv", type=Path, help="使用指定地区菜价 CSV")
+    parser.add_argument("--region", default="命令行地区", help="CSV 对应地区名称")
     parser.add_argument("--top", type=int, default=15, help="显示前 N 名植物")
     parser.add_argument(
         "--processed-output",
@@ -46,18 +49,34 @@ def main() -> int:
     if args.top < 1:
         raise SystemExit("--top 必须大于 0")
 
-    artifacts = run_data_pipeline(
-        prefer_network=args.online,
-        processed_path=args.processed_output,
-    )
-    model = build_dashboard_model(
-        args.mode,
-        args.sun,
-        args.cells,
-        processed_path=args.processed_output,
-    )
+    if args.csv is not None:
+        if args.online:
+            raise SystemExit("--csv 与 --online 不能同时使用")
+        prices = prepare_uploaded_price_data(
+            args.csv.read_bytes(),
+            region_name=args.region,
+        )
+        model = build_dashboard_model(
+            args.mode,
+            args.sun,
+            args.cells,
+            price_data=prices,
+        )
+        data_message = f"已读取 {args.region} CSV：{args.csv}"
+    else:
+        artifacts = run_data_pipeline(
+            prefer_network=args.online,
+            processed_path=args.processed_output,
+        )
+        model = build_dashboard_model(
+            args.mode,
+            args.sun,
+            args.cells,
+            processed_path=args.processed_output,
+        )
+        data_message = artifacts.collection.message
 
-    print(f"数据：{artifacts.collection.message}")
+    print(f"数据：{data_message}")
     print(f"模式：{args.mode}")
     print("评分权重：" + "，".join(f"{key}={value:.3f}" for key, value in model["weights"].items()))
     print("\n末日性价比排名：")

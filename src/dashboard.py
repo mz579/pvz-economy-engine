@@ -69,14 +69,29 @@ def build_dashboard_model(
     available_cells: int,
     *,
     processed_path: Path | str = DEFAULT_PROCESSED_PATH,
+    price_data: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     """Build the explainable, optimizer-ready model consumed by Streamlit."""
 
     if zombie_mode not in ZOMBIE_MODES:
         raise ValueError(f"未知僵尸模式: {zombie_mode}")
 
-    plants = load_plant_mapping()
-    prices = load_offline_prices(processed_path)
+    all_plants = load_plant_mapping()
+    prices = (
+        load_offline_prices(processed_path)
+        if price_data is None
+        else _validate_featured_prices(price_data)
+    )
+    available_vegetables = set(prices["name"].dropna().astype(str).str.strip())
+    plants = all_plants.loc[
+        all_plants["vegetable_name"].isin(available_vegetables)
+    ].copy()
+    if plants.empty:
+        expected = "、".join(sorted(all_plants["vegetable_name"].unique()))
+        raise ValueError(f"上传菜名无法关联任何植物，可用标准菜名包括：{expected}")
+    excluded_plants = all_plants.loc[
+        ~all_plants["name"].isin(plants["name"]), "name"
+    ].tolist()
     mode = ZOMBIE_MODES[zombie_mode]
     weights = apply_weight_multipliers(mode["weight_multipliers"])
     ranking = calculate_apocalypse_scores(plants, prices, weights=weights)
@@ -96,13 +111,14 @@ def build_dashboard_model(
         "local_csv_fallback": "本地离线 CSV fallback",
         "xinfadi_official": "北京新发地公开价格",
     }
-    data_source = "、".join(source_labels.get(item, item) for item in sources)
+    data_source = "、".join(_source_label(item, source_labels) for item in sources)
 
     return {
         "zombie_mode": zombie_mode,
         "mode": mode,
         "weights": weights,
         "plants": plants,
+        "all_plants": all_plants,
         "prices": prices,
         "ranking": ranking,
         "result": result,
@@ -111,7 +127,39 @@ def build_dashboard_model(
         "data_source": data_source,
         "score_label": "末日性价比指数",
         "score_notice": "战斗价值 × 价格低估系数 × 稳定性系数 ÷ 有效阳光成本",
+        "coverage": {
+            "matched_plants": int(len(plants)),
+            "total_plants": int(len(all_plants)),
+            "uploaded_vegetables": int(prices["name"].nunique()),
+            "matched_vegetables": int(plants["vegetable_name"].nunique()),
+            "excluded_plants": excluded_plants,
+        },
     }
+
+
+def _validate_featured_prices(prices: pd.DataFrame) -> pd.DataFrame:
+    required = {
+        "date",
+        "name",
+        "price",
+        "source",
+        "historical_mean",
+        "volatility",
+    }
+    missing = required.difference(prices.columns)
+    if missing:
+        raise ValueError(f"地区菜价缺少处理后字段: {', '.join(sorted(missing))}")
+    result = prices.copy()
+    result["date"] = pd.to_datetime(result["date"], errors="coerce")
+    if result["date"].isna().all():
+        raise ValueError("地区菜价没有有效日期")
+    return result
+
+
+def _source_label(source: str, labels: dict[str, str]) -> str:
+    if source.startswith("user_upload:"):
+        return f"用户上传 · {source.split(':', 1)[1]}"
+    return labels.get(source, source)
 
 
 def get_price_trend(prices: pd.DataFrame, vegetable_name: str) -> pd.DataFrame:

@@ -13,6 +13,7 @@ venv/
 
 *.log
 *.pid
+dist/
 Thumbs.db
 .DS_Store
 

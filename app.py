@@ -14,10 +14,12 @@ from src.dashboard import (
     build_dashboard_model,
     get_price_trend,
 )
+from src.user_data import prepare_uploaded_price_data
 
 
 ROOT = Path(__file__).resolve().parent
 STYLE_PATH = ROOT / "assets" / "style.css"
+TEMPLATE_PATH = ROOT / "data" / "templates" / "regional_prices_template.csv"
 
 
 @st.cache_data(show_spinner=False)
@@ -25,6 +27,20 @@ def get_dashboard_model(mode: str, sun: int, cells: int) -> dict:
     """Cache deterministic model results by the visible UI parameters."""
 
     return build_dashboard_model(mode, sun, cells)
+
+
+@st.cache_data(show_spinner=False)
+def get_uploaded_dashboard_model(
+    mode: str,
+    sun: int,
+    cells: int,
+    region_name: str,
+    csv_content: bytes,
+) -> dict:
+    """Prepare one uploaded region and calculate its recommendation."""
+
+    prices = prepare_uploaded_price_data(csv_content, region_name=region_name)
+    return build_dashboard_model(mode, sun, cells, price_data=prices)
 
 
 def load_styles() -> None:
@@ -73,13 +89,11 @@ def render_hero(model: dict, available_sun: int, available_cells: int) -> None:
         ("⚙️", "求解方式", "整数规划" if result["method"] == "pulp" else "贪心兜底"),
     ]
     metric_html = "".join(
-        f"""
-        <div class="battle-metric">
-          <span class="metric-icon">{icon}</span>
-          <span class="metric-label">{escape(label)}</span>
-          <strong>{escape(value)}</strong>
-        </div>
-        """
+        f'<div class="battle-metric">'
+        f'<span class="metric-icon">{icon}</span>'
+        f'<span class="metric-label">{escape(label)}</span>'
+        f'<strong>{escape(value)}</strong>'
+        f'</div>'
         for icon, label, value in metrics
     )
     st.markdown(f'<div class="battle-metric-grid">{metric_html}</div>', unsafe_allow_html=True)
@@ -107,23 +121,22 @@ def render_seed_cards(model: dict) -> None:
         row = ranking.loc[item["name"]]
         emoji = PLANT_EMOJI.get(item["name"], "🌱")
         cards.append(
-            f"""
-            <article class="seed-card">
-              <div class="seed-card-top">
-                <span class="sun-cost">☀ {item['unit_sun_cost']}</span>
-                <span class="seed-count">× {item['quantity']}</span>
-              </div>
-              <div class="plant-emoji" aria-hidden="true">{emoji}</div>
-              <h3>{escape(item['name'])}</h3>
-              <p class="plant-role">{escape(str(row['role']))}</p>
-              <div class="seed-stats">
-                <span>⚔ {int(row['attack'])}</span>
-                <span>🛡 {int(row['defense'])}</span>
-                <span>🌀 {int(row['control'])}</span>
-              </div>
-              <div class="score-strip">单株指数 <strong>{item['unit_score']:.2f}</strong></div>
-            </article>
-            """
+            f'<article class="seed-card">'
+            f'<div class="seed-card-top">'
+            f'<span class="sun-cost">☀ {item["unit_sun_cost"]}</span>'
+            f'<span class="seed-count">× {item["quantity"]}</span>'
+            f'</div>'
+            f'<div class="plant-emoji" aria-hidden="true">{emoji}</div>'
+            f'<h3>{escape(item["name"])}</h3>'
+            f'<p class="plant-role">{escape(str(row["role"]))}</p>'
+            f'<div class="seed-stats">'
+            f'<span>⚔ {int(row["attack"])}</span>'
+            f'<span>🛡 {int(row["defense"])}</span>'
+            f'<span>🌀 {int(row["control"])}</span>'
+            f'</div>'
+            f'<div class="score-strip">单株指数 '
+            f'<strong>{item["unit_score"]:.2f}</strong></div>'
+            f'</article>'
         )
     st.markdown(f'<div class="seed-grid">{"".join(cards)}</div>', unsafe_allow_html=True)
 
@@ -154,18 +167,13 @@ def render_reasons(model: dict) -> None:
     reason_cards = []
     for reason in model["reasons"]:
         reason_cards.append(
-            f"""
-            <article class="reason-card">
-              <div class="reason-icon">{reason['emoji']}</div>
-              <div>
-                <div class="reason-title">
-                  <strong>{escape(reason['name'])} × {reason['quantity']}</strong>
-                  <span>{escape(str(reason['role']))}</span>
-                </div>
-                <p>{escape(reason['text'])}</p>
-              </div>
-            </article>
-            """
+            f'<article class="reason-card">'
+            f'<div class="reason-icon">{reason["emoji"]}</div>'
+            f'<div><div class="reason-title">'
+            f'<strong>{escape(reason["name"])} × {reason["quantity"]}</strong>'
+            f'<span>{escape(str(reason["role"]))}</span>'
+            f'</div><p>{escape(reason["text"])}</p></div>'
+            f'</article>'
         )
     st.markdown(f'<div class="reason-grid">{"".join(reason_cards)}</div>', unsafe_allow_html=True)
 
@@ -202,18 +210,52 @@ def main() -> None:
         st.caption(ZOMBIE_MODES[zombie_mode]["description"])
         available_sun = st.slider("☀️ 可用阳光", 50, 500, 150, 25)
         available_cells = st.slider("🌱 草坪格子", 5, 45, 20, 5)
+        st.markdown("### 📍 地区菜价")
+        region_name = st.text_input(
+            "地区名称",
+            value="我的地区",
+            help="例如：上海浦东、成都双流。名称只用于标记数据来源。",
+        )
+        uploaded_file = st.file_uploader(
+            "上传地区菜价 CSV",
+            type=["csv"],
+            help="支持 date/name/price/unit 或对应中文列名；价格单位支持元/kg、元/斤。",
+        )
+        st.download_button(
+            "⬇️ 下载 CSV 模板",
+            data=TEMPLATE_PATH.read_bytes(),
+            file_name="regional_prices_template.csv",
+            mime="text/csv",
+        )
         st.markdown(
             """
             <div class="sidebar-note">
               <strong>离线可运行</strong>
-              <span>没有 processed 文件时会自动使用仓库内 CSV fallback 生成。</span>
+              <span>不上传时使用北京示例；上传后按你的地区菜价重新分析。</span>
             </div>
             """,
             unsafe_allow_html=True,
         )
         st.caption("本页面只使用 emoji 与原创 CSS，不含官方游戏素材。")
 
-    model = get_dashboard_model(zombie_mode, available_sun, available_cells)
+    try:
+        if uploaded_file is None:
+            model = get_dashboard_model(
+                zombie_mode, available_sun, available_cells
+            )
+        else:
+            model = get_uploaded_dashboard_model(
+                zombie_mode,
+                available_sun,
+                available_cells,
+                region_name,
+                uploaded_file.getvalue(),
+            )
+    except ValueError as exc:
+        st.error(f"地区菜价无法分析：{exc}")
+        st.info("可以先下载侧栏 CSV 模板，保留表头后替换成当地菜价。")
+        return
+
     result = model["result"]
 
     render_hero(model, available_sun, available_cells)
@@ -223,6 +265,14 @@ def main() -> None:
         unsafe_allow_html=True,
     )
     render_constraint_bar(result)
+
+    coverage = model["coverage"]
+    if coverage["excluded_plants"]:
+        excluded = "、".join(coverage["excluded_plants"])
+        st.info(
+            f"本次菜价关联到 {coverage['matched_plants']} / "
+            f"{coverage['total_plants']} 种植物；缺少对应菜价的植物暂不参赛：{excluded}。"
+        )
 
     if not result["all_constraints_met"]:
         st.error(result["recommendation_reason"])

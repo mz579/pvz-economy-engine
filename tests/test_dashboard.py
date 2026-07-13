@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.dashboard import ZOMBIE_MODES, build_dashboard_model, get_price_trend
+from src.user_data import prepare_uploaded_price_data
 
 
 class DashboardModelTests(unittest.TestCase):
@@ -42,6 +43,20 @@ class DashboardModelTests(unittest.TestCase):
         self.assertFalse(trend.empty)
         self.assertTrue(trend["date"].is_monotonic_increasing)
 
+    def test_uploaded_region_can_score_partial_mapping(self) -> None:
+        content = (ROOT / "data" / "templates" / "regional_prices_template.csv").read_bytes()
+        prices = prepare_uploaded_price_data(content, region_name="测试地区")
+        model = build_dashboard_model(
+            "均衡巡逻",
+            150,
+            20,
+            price_data=prices,
+        )
+        self.assertIn("用户上传 · 测试地区", model["data_source"])
+        self.assertGreaterEqual(model["coverage"]["matched_plants"], 2)
+        self.assertLess(model["coverage"]["matched_plants"], 15)
+        self.assertTrue(model["result"]["all_constraints_met"])
+
 
 class StreamlitAppTests(unittest.TestCase):
     def test_app_source_declares_required_dashboard_sections(self) -> None:
@@ -53,6 +68,8 @@ class StreamlitAppTests(unittest.TestCase):
             "草坪网格布局",
             "菜价趋势与推荐排行",
             "推荐理由解释",
+            "上传地区菜价 CSV",
+            "下载 CSV 模板",
         )
         for label in required_labels:
             with self.subTest(label=label):

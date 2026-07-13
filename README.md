@@ -2,14 +2,14 @@
 
 > 僵尸来了先别慌，看看今天土豆多少钱。毕竟末日可以不精致，但种菜不能不讲性价比。😁
 
-PvZ Economy Engine V2.0 是一个“看起来在打僵尸，实际上认真做数据分析”的蔬菜种植推荐系统。它把北京地区的真实菜价、植物策略属性和有限资源约束放进同一块草坪里，专门研究一个非常严肃、也非常离谱的问题：**如果末日真的来了，有限的阳光和格子到底该种什么，才能既守住脑子，又守住钱包？**
+PvZ Economy Engine V2.0 是一个“看起来在打僵尸，实际上认真做数据分析”的蔬菜种植推荐系统。它把北京示例数据或用户上传的任意地区菜价、植物策略属性和有限资源约束放进同一块草坪里，专门研究一个非常严肃、也非常离谱的问题：**如果末日真的来了，有限的阳光和格子到底该种什么，才能既守住脑子，又守住钱包？**
 
 系统会采集或读取真实菜价，清洗数据，把现实蔬菜映射成植物，再计算末日性价比指数并推荐种植组合。它不能替你把僵尸赶走，但至少能阻止你在预算只有 150 阳光时，冲动消费一排三线射手。
 
 目前项目已经跑通完整链路，数据从菜市场一路走到草坪，中途没有被僵尸吃掉：
 
 ```text
-北京新发地公开价格 / 本地 CSV fallback
+北京新发地公开价格 / 本地 CSV fallback / 用户地区 CSV
   -> crawler.py 采集与回退
   -> preprocess.py 日期、菜名、单位清洗
   -> features.py 30 日价格特征
@@ -27,6 +27,26 @@ PvZ Economy Engine V2.0 是一个“看起来在打僵尸，实际上认真做�
 - **预算意识良好**：阳光、格子、攻击和防御/控制四项约束逐项检查，坚决制止“全种向日葵然后祈祷”的激进方案。
 - **求解器有后路**：优先让 PuLP 当军师；CBC 临时掉线时，贪心 fallback 会顶上，主打一个队伍可以降级，草坪不能停摆。
 - **美术素材很克制**：页面只用 emoji 和原创 CSS，不搬运官方素材——律师函的攻击力不在本系统建模范围内。
+
+## 下载后直接运行
+
+不想先研究 Git、虚拟环境和依赖关系？可以前往 [GitHub Releases](https://github.com/mz579/pvz-economy-engine/releases/latest) 下载 `portable.zip`。完整解压后：
+
+- Windows：双击 `start_windows.bat`；
+- macOS / Linux：执行 `bash start_unix.sh`；
+- 第一次启动会创建 `.venv` 并安装依赖，随后浏览器自动打开页面。
+
+发布包里的 `README_FIRST.txt` 是极简操作说明。注意一定要先完整解压，别在压缩包里直接运行——植物能破土而出，Python 环境一般不行。
+
+## 网站界面在哪里？
+
+这是一个运行在本机的 Streamlit Web 应用，不是需要作者一直开着服务器的公共网站。启动成功后访问：
+
+**http://localhost:8501**
+
+![末日菜园作战室界面](docs/screenshots/dashboard.png)
+
+网页左侧可以选择僵尸模式、阳光和格子，也可以填写地区名称、上传当地菜价 CSV 或下载模板。默认不上传时使用北京新发地离线示例。
 
 ## 从零开始
 
@@ -50,6 +70,12 @@ macOS/Linux 只需把激活命令替换为 `source .venv/bin/activate`。浏览�
 python cli.py --mode "均衡巡逻" --sun 150 --cells 20
 ```
 
+命令行也可以直接分析地区 CSV：
+
+```bash
+python cli.py --csv data/templates/regional_prices_template.csv --region "成都" --sun 150 --cells 20
+```
+
 尝试在线更新北京新发地价格：
 
 ```bash
@@ -63,6 +89,8 @@ python cli.py --online --mode "尸潮来袭" --sun 200 --cells 25
 
 在线适配器只访问[北京新发地公开价格页面](https://www.xinfadi.com.cn/priceDetail.html)对应的数据接口，默认处理近 30 天。离线源位于 `data/fallback/vegetable_prices.csv`。
 
+北京新发地只是默认示例，不是地区限制。页面支持上传任意地区 CSV：系统会统一清洗单位，只分析能够和植物映射表关联的蔬菜，并把缺少菜价的植物列为“本轮未参赛”。这样既能适配不同地区，又不用养一支专门追着全国菜市场网页改版跑的爬虫维修队。
+
 基础字段契约：
 
 | 字段 | 含义 |
@@ -70,7 +98,9 @@ python cli.py --online --mode "尸潮来袭" --sun 200 --cells 25
 | `date` | 日期，输出为 `YYYY-MM-DD` |
 | `name` | 标准蔬菜名，别名会在清洗层统一 |
 | `price` | 价格，统一为人民币元/kg；元/斤自动乘 2 |
-| `source` | `xinfadi_official` 或 `local_csv_fallback` |
+| `source` | `xinfadi_official`、`local_csv_fallback` 或 `user_upload:地区名` |
+
+上传模板使用 `date,name,price,unit`；也支持 `日期,品种,均价,单位` 等中文表头，以及 UTF-8、GB18030、元/kg 和元/斤。地区名称由侧栏填写，运行时记录为 `user_upload:地区名`。
 
 `src/features.py` 按蔬菜和日期计算 7/14/30 日均价、30 日历史均价、涨跌幅、价格分位和波动率。`data/raw/` 与 `data/processed/` 中的运行产物已由 `.gitignore` 排除，确保它们只能由流水线生成。
 
