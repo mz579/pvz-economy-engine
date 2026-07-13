@@ -197,7 +197,7 @@ def main() -> None:
         zombie_mode = st.selectbox(
             "僵尸模式",
             options=list(ZOMBIE_MODES),
-            help="切换敌情会调整兼容战力权重并重新计算推荐。",
+            help="切换敌情会调整五项战斗价值权重并重新计算推荐。",
         )
         st.caption(ZOMBIE_MODES[zombie_mode]["description"])
         available_sun = st.slider("☀️ 可用阳光", 50, 500, 150, 25)
@@ -231,7 +231,7 @@ def main() -> None:
     section_header(
         "SEED DECK",
         "植物推荐卡片",
-        "每张种子卡展示成本、数量、定位与本轮兼容推荐指数。",
+        "每张种子卡展示成本、数量、定位与本轮末日性价比指数。",
     )
     render_seed_cards(model)
 
@@ -245,7 +245,7 @@ def main() -> None:
     section_header(
         "MARKET INTEL",
         "菜价趋势与推荐排行",
-        "趋势来自本地离线样例；排行暂用兼容战力，正式指数将在第 4 批接入。",
+        "菜价经过统一清洗和 30 日特征计算；僵尸模式变化会触发重新评分。",
     )
     chart_left, chart_right = st.columns([1.15, 1])
     vegetables = model["ranking"]["vegetable_name"].drop_duplicates().tolist()
@@ -259,9 +259,9 @@ def main() -> None:
         )
         st.caption(f"{selected_vegetable} · 单位：元/kg · 来源：{model['data_source']}")
     with chart_right:
-        top_ranking = model["ranking"].head(10).set_index("name")[["utility"]]
+        top_ranking = model["ranking"].head(10).set_index("name")[["apocalypse_index"]]
         st.bar_chart(top_ranking, height=310, **stretch_width(st.bar_chart))
-        st.caption("Top 10 兼容推荐指数；僵尸模式变化后自动重排。")
+        st.caption("Top 10 末日性价比指数；僵尸模式变化后自动重排。")
 
     section_header(
         "WHY THIS TEAM",
@@ -279,7 +279,11 @@ def main() -> None:
                 "role",
                 "sun_cost",
                 "latest_price",
-                "utility",
+                "battle_value",
+                "price_undervaluation",
+                "stability_coefficient",
+                "apocalypse_index",
+                "recommendation_reason",
             ]
         ].rename(
             columns={
@@ -289,7 +293,11 @@ def main() -> None:
                 "role": "定位",
                 "sun_cost": "阳光成本",
                 "latest_price": "最新菜价(元/kg)",
-                "utility": "兼容推荐指数",
+                "battle_value": "战斗价值",
+                "price_undervaluation": "价格低估系数",
+                "stability_coefficient": "稳定性系数",
+                "apocalypse_index": "末日性价比指数",
+                "recommendation_reason": "评分理由",
             }
         )
         st.dataframe(table, hide_index=True, **stretch_width(st.dataframe))
@@ -297,7 +305,7 @@ def main() -> None:
             {
                 "求解状态": result["status"],
                 "约束检查": result["constraint_checks"],
-                "兼容权重": model["weights"],
+                "评分权重": model["weights"],
             }
         )
 

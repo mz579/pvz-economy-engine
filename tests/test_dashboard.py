@@ -22,6 +22,8 @@ class DashboardModelTests(unittest.TestCase):
         self.assertTrue(model["result"]["all_constraints_met"])
         self.assertTrue(model["result"]["combination"])
         self.assertEqual(len(model["reasons"]), len(model["result"]["combination"]))
+        self.assertEqual(model["result"]["score_column"], "apocalypse_index")
+        self.assertEqual(model["score_label"], "末日性价比指数")
 
     def test_every_zombie_mode_can_refresh_a_recommendation(self) -> None:
         scores = []
