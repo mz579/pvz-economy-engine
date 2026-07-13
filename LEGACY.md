@@ -16,10 +16,13 @@
 ## 兼容期保留但等待替换
 
 - `src/valuator.py`：第 4 批由 `src/scoring.py` 的 V2.0 公式替换。
-- `src/optimizer.py`：第 5 批重写约束和 fallback。
 - `src/app.py`：第 6 批由根目录 `app.py` 的 V2.0 页面替换。
 - `src/forecast.py`：不接入 V2.0 核心链；项目稳定后再决定是否保留。
 - `src/config.py` 与 `src/adapters/`：第 2 批收敛为北京新发地加本地 CSV fallback。
+
+## 已完成替换
+
+- `src/optimizer.py`：第 5 批已收敛为四项约束的 PuLP 整数规划，并提供无 PuLP/CBC 时的贪心 fallback；旧接口仅作为临时兼容层保留。
 
 ## 清理条件
 

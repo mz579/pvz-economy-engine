@@ -1,233 +1,455 @@
-"""Planting decision optimizer - PuLP MIP with shadow prices and cash-flow constraints.
+"""V2.0 planting combination optimizer.
 
-V1.0 upgrade:
-- Mixed Integer Programming (MIP) via PuLP
-- Proper shadow prices from LP relaxation dual variables
-- Dynamic cash-flow (payback period) constraint
-- Zombie factor style rotation integrated
+The optimizer consumes a score that is calculated elsewhere. It maximizes the
+total score under sun, cell, attack, and defense/control constraints. PuLP is
+optional at runtime: when it or its solver is unavailable, a deterministic
+greedy fallback still returns a constraint-checked result.
 """
-from typing import Dict, List, Optional, Any, Tuple
+
+from __future__ import annotations
+
+from typing import Any, Mapping, Sequence
+import warnings
+
 import pandas as pd
-import pulp as pl
-import numpy as np
+
+try:  # The fallback must remain importable when PuLP is not installed.
+    import pulp as pl
+except ImportError:  # pragma: no cover - covered through use_pulp=False tests
+    pl = None
 
 
-MAX_PER_PLANT = 8
-SUN_GEN_RATE = 2
-SUN_DROP_MEAN = 25
-SUN_DROP_RATE = 1 / 10
-CASH_FLOW_WINDOW = 30
+SCORE_COLUMN_CANDIDATES = ("apocalypse_index", "score", "utility")
+SUPPORT_SCORE_THRESHOLD = 5
 
 
-def _get_params(plants):
-    names = [p['name'] for p in plants]
-    sun_c = {p['name']: p['sun_cost'] for p in plants}
-    util = {p['name']: p['utility'] for p in plants}
-    cat = {p['name']: p.get('category', '') for p in plants}
-    spec = {p['name']: p.get('special_tag', '') for p in plants}
-    return names, sun_c, util, cat, spec
+def optimize_planting(
+    plants: pd.DataFrame | Sequence[Mapping[str, Any]],
+    *,
+    available_sun: int = 150,
+    available_cells: int = 45,
+    score_column: str | None = None,
+    use_pulp: bool = True,
+) -> dict[str, Any]:
+    """Return the highest-scoring feasible planting combination.
 
+    A plant is considered an attacker when it is explicitly categorized as
+    ``攻击`` or, when no category is available, has a positive attack value.
+    Defense/control candidates are recognized from their category, role, or a
+    defense/control rating of at least five on the V2 0-10 scale.
+    """
 
-def _build_lp_for_shadow(plants, available_sun, available_cells, deviation_dict):
-    """Build LP relaxation to extract proper shadow prices."""
-    names, sun_c, util, cat, spec = _get_params(plants)
-    dev = {n: deviation_dict.get(n, 0.0) for n in names}
-    defense_tag = chr(38450) + chr(24432)
+    data, resolved_score = _prepare_plants(plants, score_column)
+    _validate_limits(available_sun, available_cells)
 
-    prob = pl.LpProblem('LP_Shadow', pl.LpMaximize)
-    x = {n: pl.LpVariable('x_' + n, lowBound=0, upBound=MAX_PER_PLANT, cat=pl.LpContinuous) for n in names}
-    penalty_weights = {n: util[n] * (1 - abs(dev[n]) * 0.15) for n in names}
-    prob += pl.lpSum([penalty_weights[n] * x[n] for n in names]), 'Total_Efficiency'
-    prob += pl.lpSum([sun_c[n] * x[n] for n in names]) <= available_sun, 'Sun_Limit'
-    prob += pl.lpSum([x[n] for n in names]) <= available_cells, 'Cell_Limit'
-    def_plants = [n for n in names if cat.get(n, '') == defense_tag]
-    if def_plants:
-        prob += pl.lpSum([x[n] for n in def_plants]) >= 1, 'Min_Defense'
-    prod_plants = [n for n in names if spec.get(n, '') == 'PRODUCE']
-    if prod_plants:
-        prob += pl.lpSum([x[n] for n in prod_plants]) >= 1, 'Min_Producer'
+    if not data["_is_attack"].any() or not data["_is_support"].any():
+        return _build_result(
+            data,
+            {},
+            available_sun,
+            available_cells,
+            resolved_score,
+            status="Infeasible",
+            method="none",
+            fallback_reason="植物表缺少攻击或防御/控制候选植物",
+        )
 
-    prob.solve(pl.PULP_CBC_CMD(msg=False))
-    return prob, x
-
-
-def _build_mip(plants, available_sun, available_cells, deviation_dict, zombie_factor):
-    names, sun_c, util, cat, spec = _get_params(plants)
-    defense_tag = chr(38450) + chr(24432)
-    dev = {n: deviation_dict.get(n, 0.0) for n in names}
-    prob = pl.LpProblem('PvZ_Optimizer', pl.LpMaximize)
-    x = {n: pl.LpVariable('x_' + n, lowBound=0, upBound=MAX_PER_PLANT, cat=pl.LpInteger) for n in names}
-    penalty_weights = {n: util[n] * (1 - abs(dev[n]) * 0.15) for n in names}
-    prob += pl.lpSum([penalty_weights[n] * x[n] for n in names]), 'Total_Efficiency'
-    prob += pl.lpSum([sun_c[n] * x[n] for n in names]) <= available_sun, 'Sun_Limit'
-    prob += pl.lpSum([x[n] for n in names]) <= available_cells, 'Cell_Limit'
-    def_plants = [n for n in names if cat.get(n, '') == defense_tag]
-    if def_plants:
-        prob += pl.lpSum([x[n] for n in def_plants]) >= 1, 'Min_Defense'
-    prod_plants = [n for n in names if spec.get(n, '') == 'PRODUCE']
-    if prod_plants:
-        prob += pl.lpSum([x[n] for n in prod_plants]) >= 1, 'Min_Producer'
-    non_prod = [n for n in names if spec.get(n, '') != 'PRODUCE']
-    producer_income = pl.lpSum([x[n] for n in prod_plants]) * SUN_GEN_RATE * CASH_FLOW_WINDOW
-    drop_income = pl.lpSum([x[n] for n in names]) * SUN_DROP_MEAN * SUN_DROP_RATE * CASH_FLOW_WINDOW
-    total_cost = pl.lpSum([sun_c[n] * x[n] for n in names])
-    total_income = producer_income + drop_income
-    prob += total_cost - total_income <= available_sun, 'CashFlow_Payback'
-    prob.solve(pl.PULP_CBC_CMD(msg=False))
-    if pl.LpStatus[prob.status] != 'Optimal':
-        return None, None
-    return prob, x
-
-
-def solve(plants, available_sun=150, available_cells=45, budget=None, zombie_factor=None, deviation_data=None):
-    if zombie_factor is None:
-        zombie_factor = {'swarm': 0.5, 'tank': 0.3, 'air': 0.2}
-    if deviation_data is None:
-        deviation_data = {}
-    if budget is None:
-        budget = float(available_sun)
-
-    prob, x = _build_mip(plants, available_sun, available_cells, deviation_data, zombie_factor)
-    if prob is None:
-        return _fallback_greedy(plants, available_sun, available_cells, deviation_data, zombie_factor)
-
-    names = [p['name'] for p in plants]
-    strategy = {n: int(pl.value(x[n])) for n in names if int(pl.value(x[n]) or 0) > 0}
-    sun_c = {p['name']: p['sun_cost'] for p in plants}
-    util = {p['name']: p['utility'] for p in plants}
-    total_util = sum(util[n] * c for n, c in strategy.items())
-    total_cost = sum(sun_c[n] * c for n, c in strategy.items())
-    total_plants = sum(strategy.values())
-
-    # Get shadow prices from LP relaxation (dual values from MIP are unreliable)
-    lp_prob, _ = _build_lp_for_shadow(plants, available_sun, available_cells, deviation_data)
-    sun_shadow = 0.0
-    cell_shadow = 0.0
-    if lp_prob is not None:
-        if 'Sun_Limit' in lp_prob.constraints:
-            pi_val = lp_prob.constraints['Sun_Limit'].pi
-            sun_shadow = round(float(pi_val), 4) if pi_val is not None else 0.0
-        if 'Cell_Limit' in lp_prob.constraints:
-            pi_val = lp_prob.constraints['Cell_Limit'].pi
-            cell_shadow = round(float(pi_val), 4) if pi_val is not None else 0.0
-
-    return {
-        'strategy': strategy,
-        'total_utility': round(total_util, 4),
-        'total_cost': int(total_cost),
-        'total_plants': total_plants,
-        'sun_shadow_price': sun_shadow,
-        'cell_shadow_price': cell_shadow,
-        'cost_shadow_price': 0.0,
-        'status': 'Optimal (MIP)',
-    }
-
-
-def _fallback_greedy(plants, available_sun, available_cells, deviation_data, zombie_factor):
-    names, sun_c, util, cat, spec = _get_params(plants)
-    defense_tag = chr(38450) + chr(24432)
-    dev = {n: deviation_data.get(n, 0.0) for n in names}
-    scores = {}
-    for n in names:
-        s = sun_c[n] if sun_c[n] > 0 else 0.1
-        sc = util[n] / (1 + s * 0.01)
-        sc -= abs(dev.get(n, 0)) * 0.15
-        scores[n] = sc
-    sorted_n = sorted(names, key=lambda n: -scores[n])
-    strategy = {}
-    rem_sun, rem_cells = available_sun, available_cells
-    total_util, has_def, has_prod = 0.0, False, False
-    for n in sorted_n:
-        mx = min(MAX_PER_PLANT, rem_cells)
-        if sun_c[n] > 0:
-            mx = min(mx, int(rem_sun / sun_c[n]))
-        if mx <= 0:
-            continue
-        strategy[n] = mx
-        total_util += util[n] * mx
-        rem_sun -= sun_c[n] * mx
-        rem_cells -= mx
-        if cat.get(n, '') == defense_tag:
-            has_def = True
-        if spec.get(n, '') == 'PRODUCE':
-            has_prod = True
-    if not has_def:
-        defs = [n for n in names if cat.get(n, '') == defense_tag]
-        if defs:
-            bd = max(defs, key=lambda n: util[n] / max(sun_c[n], 1))
-            sc = sun_c[bd]
-            if sc <= rem_sun and rem_cells >= 1:
-                strategy[bd] = strategy.get(bd, 0) + 1
-                total_util += util[bd]
-                rem_sun -= sc
-                rem_cells -= 1
-    if not has_prod:
-        prods = [n for n in names if spec.get(n, '') == 'PRODUCE']
-        if prods:
-            bp = min(prods, key=lambda n: sun_c[n])
-            sc = sun_c[bp]
-            if sc <= rem_sun and rem_cells >= 1:
-                strategy[bp] = strategy.get(bp, 0) + 1
-                total_util += util[bp]
-                rem_sun -= sc
-                rem_cells -= 1
-    final = {k: v for k, v in strategy.items() if v > 0}
-    total_cost = available_sun - rem_sun
-    sun_shadow, cell_shadow = 0.0, 0.0
-    if total_util > 0:
-        def _perturb(sun_adj, cell_adj):
-            s = available_sun + sun_adj
-            c = available_cells + cell_adj
-            strat2 = {}
-            rs, rc = s, c
-            tu = 0.0
-            for n in sorted(names, key=lambda nn: -scores[nn]):
-                mx = min(MAX_PER_PLANT, rc)
-                if sun_c[n] > 0:
-                    mx = min(mx, int(rs / sun_c[n]))
-                if mx <= 0:
-                    continue
-                strat2[n] = mx
-                tu += util[n] * mx
-                rs -= sun_c[n] * mx
-                rc -= mx
-            return tu
-        base_u = total_util
-        sun_shadow = round(max(0, (_perturb(10, 0) - base_u) / 10), 4)
-        cell_shadow = round(max(0, (_perturb(0, 2) - base_u) / 2), 4)
-    return {
-        'strategy': final,
-        'total_utility': round(total_util, 4),
-        'total_cost': int(total_cost),
-        'total_plants': sum(final.values()),
-        'sun_shadow_price': sun_shadow,
-        'cell_shadow_price': cell_shadow,
-        'cost_shadow_price': 0.0,
-        'status': 'Heuristic (greedy fallback)',
-    }
-
-
-def run_optimization(df_plants, deviation_df=None, available_sun=150, available_cells=45, zombie_factor=None):
-    plants_list = df_plants.to_dict(orient='records')
-    dev_dict = {}
-    if deviation_df is not None and not deviation_df.empty:
-        dev_dict = dict(zip(deviation_df['plant'].values, deviation_df['deviation'].values))
-    return solve(plants_list, available_sun, available_cells, float(available_sun), zombie_factor, dev_dict)
-
-
-def print_strategy(result):
-    print('=' * 50)
-    print(f"Status: {result['status']}")
-    print(f"Total plants: {result.get('total_plants', 0)}")
-    print(f"Total utility: {result['total_utility']:.2f}")
-    print(f"Total sun cost: {result['total_cost']}")
-    print(f"Sun shadow price: {result['sun_shadow_price']:.4f}")
-    print(f"Cell shadow price: {result['cell_shadow_price']:.4f}")
-    print('-' * 50)
-    if result['strategy']:
-        print('Optimal strategy:')
-        for plant, count in sorted(result['strategy'].items(), key=lambda x: -x[1]):
-            print(f"  {plant}: {count}")
+    fallback_reason = ""
+    if use_pulp and pl is not None:
+        try:
+            strategy, solver_status = _solve_with_pulp(
+                data, available_sun, available_cells
+            )
+        except Exception as exc:  # Solver availability varies by environment.
+            fallback_reason = f"PuLP 求解不可用: {exc}"
+        else:
+            if solver_status == "Optimal":
+                return _build_result(
+                    data,
+                    strategy,
+                    available_sun,
+                    available_cells,
+                    resolved_score,
+                    status="Optimal (PuLP)",
+                    method="pulp",
+                )
+            return _build_result(
+                data,
+                {},
+                available_sun,
+                available_cells,
+                resolved_score,
+                status=f"Infeasible (PuLP: {solver_status})",
+                method="pulp",
+            )
+    elif use_pulp:
+        fallback_reason = "未安装 PuLP"
     else:
-        print('No feasible solution')
-    print('=' * 50)
+        fallback_reason = "已指定使用贪心 fallback"
+
+    strategy = _solve_greedy(data, available_sun, available_cells)
+    if strategy is None:
+        return _build_result(
+            data,
+            {},
+            available_sun,
+            available_cells,
+            resolved_score,
+            status="Infeasible (greedy fallback)",
+            method="greedy",
+            fallback_reason=fallback_reason,
+        )
+
+    return _build_result(
+        data,
+        strategy,
+        available_sun,
+        available_cells,
+        resolved_score,
+        status="Feasible (greedy fallback)",
+        method="greedy",
+        fallback_reason=fallback_reason,
+    )
+
+
+def _prepare_plants(
+    plants: pd.DataFrame | Sequence[Mapping[str, Any]],
+    score_column: str | None,
+) -> tuple[pd.DataFrame, str]:
+    data = plants.copy() if isinstance(plants, pd.DataFrame) else pd.DataFrame(plants)
+    if data.empty:
+        raise ValueError("植物数据不能为空")
+
+    for column in ("name", "sun_cost"):
+        if column not in data.columns:
+            raise ValueError(f"植物数据缺少字段: {column}")
+
+    resolved_score = _resolve_score_column(data, score_column)
+    if data["name"].fillna("").astype(str).str.strip().eq("").any():
+        raise ValueError("植物名不能为空")
+    if data["name"].duplicated().any():
+        raise ValueError("植物名不能重复")
+
+    data["sun_cost"] = pd.to_numeric(data["sun_cost"], errors="coerce")
+    data["_score"] = pd.to_numeric(data[resolved_score], errors="coerce")
+    if data[["sun_cost", "_score"]].isna().any().any():
+        raise ValueError("sun_cost 和评分必须是有效数字")
+    if data["sun_cost"].lt(0).any():
+        raise ValueError("sun_cost 不能为负数")
+
+    data["_is_attack"] = _attack_mask(data)
+    data["_is_support"] = _support_mask(data)
+    return data.reset_index(drop=True), resolved_score
+
+
+def _resolve_score_column(data: pd.DataFrame, requested: str | None) -> str:
+    if requested is not None:
+        if requested not in data.columns:
+            raise ValueError(f"植物数据缺少评分字段: {requested}")
+        return requested
+    for candidate in SCORE_COLUMN_CANDIDATES:
+        if candidate in data.columns:
+            return candidate
+    raise ValueError(
+        "植物数据缺少评分字段，需提供 apocalypse_index、score 或 utility"
+    )
+
+
+def _attack_mask(data: pd.DataFrame) -> pd.Series:
+    if "is_attack" in data.columns:
+        return data["is_attack"].fillna(False).astype(bool)
+
+    category = data.get("category", pd.Series("", index=data.index)).fillna("")
+    mask = category.astype(str).str.strip().eq("攻击")
+    if not mask.any() and "attack" in data.columns:
+        mask = pd.to_numeric(data["attack"], errors="coerce").fillna(0).gt(0)
+    return mask
+
+
+def _support_mask(data: pd.DataFrame) -> pd.Series:
+    if "is_defense_or_control" in data.columns:
+        return data["is_defense_or_control"].fillna(False).astype(bool)
+
+    category = data.get("category", pd.Series("", index=data.index)).fillna("")
+    role = data.get("role", pd.Series("", index=data.index)).fillna("")
+    defense = pd.to_numeric(
+        data.get("defense", pd.Series(0, index=data.index)), errors="coerce"
+    ).fillna(0)
+    control = pd.to_numeric(
+        data.get("control", pd.Series(0, index=data.index)), errors="coerce"
+    ).fillna(0)
+
+    return (
+        category.astype(str).str.strip().eq("防御")
+        | role.astype(str).str.contains("防御|控制", regex=True)
+        | defense.ge(SUPPORT_SCORE_THRESHOLD)
+        | control.ge(SUPPORT_SCORE_THRESHOLD)
+    )
+
+
+def _validate_limits(available_sun: int, available_cells: int) -> None:
+    if available_sun < 0:
+        raise ValueError("可用阳光不能为负数")
+    if available_cells < 1:
+        raise ValueError("格子数必须至少为 1")
+
+
+def _solve_with_pulp(
+    data: pd.DataFrame, available_sun: int, available_cells: int
+) -> tuple[dict[str, int], str]:
+    if pl is None:
+        raise RuntimeError("PuLP 未安装")
+
+    problem = pl.LpProblem("PvZ_V2_Planting", pl.LpMaximize)
+    indices = data.index.tolist()
+    if hasattr(problem, "add_variable_dicts"):
+        quantities = problem.add_variable_dicts(
+            "quantity",
+            indices,
+            lowBound=0,
+            upBound=available_cells,
+            cat=pl.LpInteger,
+        )
+    else:  # PuLP 2.x compatibility.
+        quantities = pl.LpVariable.dicts(
+            "quantity",
+            indices,
+            lowBound=0,
+            upBound=available_cells,
+            cat=pl.LpInteger,
+        )
+
+    problem += pl.lpSum(data.at[i, "_score"] * quantities[i] for i in indices)
+    problem += (
+        pl.lpSum(data.at[i, "sun_cost"] * quantities[i] for i in indices)
+        <= available_sun,
+        "sun_limit",
+    )
+    problem += (
+        pl.lpSum(quantities[i] for i in indices) <= available_cells,
+        "cell_limit",
+    )
+    problem += (
+        pl.lpSum(quantities[i] for i in indices if data.at[i, "_is_attack"]) >= 1,
+        "minimum_attack",
+    )
+    problem += (
+        pl.lpSum(quantities[i] for i in indices if data.at[i, "_is_support"]) >= 1,
+        "minimum_defense_or_control",
+    )
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore", message="PULP_CBC_CMD is deprecated.*", category=DeprecationWarning
+        )
+        solver = pl.PULP_CBC_CMD(msg=False)
+        problem.solve(solver)
+
+    solver_status = pl.LpStatus.get(problem.status, str(problem.status))
+    if solver_status != "Optimal":
+        return {}, solver_status
+
+    strategy = {
+        data.at[i, "name"]: int(round(pl.value(quantities[i]) or 0))
+        for i in indices
+        if int(round(pl.value(quantities[i]) or 0)) > 0
+    }
+    return strategy, solver_status
+
+
+def _solve_greedy(
+    data: pd.DataFrame, available_sun: int, available_cells: int
+) -> dict[str, int] | None:
+    attack_indices = data.index[data["_is_attack"]].tolist()
+    support_indices = data.index[data["_is_support"]].tolist()
+    seeds: list[tuple[tuple[float, float], dict[int, int]]] = []
+
+    for attack_index in attack_indices:
+        for support_index in support_indices:
+            seed = {attack_index: 1}
+            seed[support_index] = seed.get(support_index, 0) + (
+                0 if support_index == attack_index else 1
+            )
+            cells = sum(seed.values())
+            sun = sum(data.at[i, "sun_cost"] * count for i, count in seed.items())
+            score = sum(data.at[i, "_score"] * count for i, count in seed.items())
+            if cells <= available_cells and sun <= available_sun:
+                seeds.append(((score, -sun), seed))
+
+    if not seeds:
+        return None
+
+    _, selected = max(seeds, key=lambda item: item[0])
+    used_cells = sum(selected.values())
+    used_sun = sum(data.at[i, "sun_cost"] * count for i, count in selected.items())
+
+    ranked = sorted(data.index, key=lambda i: _greedy_rank(data.loc[i]), reverse=True)
+    while used_cells < available_cells:
+        choice = next(
+            (
+                i
+                for i in ranked
+                if data.at[i, "_score"] > 0
+                and used_sun + data.at[i, "sun_cost"] <= available_sun
+            ),
+            None,
+        )
+        if choice is None:
+            break
+        selected[choice] = selected.get(choice, 0) + 1
+        used_sun += data.at[choice, "sun_cost"]
+        used_cells += 1
+
+    return {data.at[i, "name"]: count for i, count in selected.items() if count > 0}
+
+
+def _greedy_rank(row: pd.Series) -> tuple[float, float, float]:
+    score = float(row["_score"])
+    cost = float(row["sun_cost"])
+    efficiency = float("inf") if cost == 0 and score > 0 else score / max(cost, 1)
+    return efficiency, score, -cost
+
+
+def _build_result(
+    data: pd.DataFrame,
+    strategy: Mapping[str, int],
+    available_sun: int,
+    available_cells: int,
+    score_column: str,
+    *,
+    status: str,
+    method: str,
+    fallback_reason: str = "",
+) -> dict[str, Any]:
+    indexed = data.set_index("name", drop=False)
+    combination = []
+    for name, quantity in strategy.items():
+        row = indexed.loc[name]
+        unit_sun = float(row["sun_cost"])
+        unit_score = float(row["_score"])
+        combination.append(
+            {
+                "name": name,
+                "quantity": int(quantity),
+                "unit_sun_cost": _display_number(unit_sun),
+                "unit_score": round(unit_score, 4),
+                "subtotal_sun": _display_number(unit_sun * quantity),
+                "subtotal_score": round(unit_score * quantity, 4),
+                "role": str(row.get("role", row.get("category", ""))),
+            }
+        )
+
+    combination.sort(key=lambda item: item["subtotal_score"], reverse=True)
+    total_sun = sum(float(item["subtotal_sun"]) for item in combination)
+    total_score = sum(float(item["subtotal_score"]) for item in combination)
+    total_plants = sum(int(item["quantity"]) for item in combination)
+    selected_names = {name for name, quantity in strategy.items() if quantity > 0}
+    has_attack = any(
+        name in selected_names and bool(row["_is_attack"])
+        for name, row in indexed.iterrows()
+    )
+    has_support = any(
+        name in selected_names and bool(row["_is_support"])
+        for name, row in indexed.iterrows()
+    )
+
+    checks = {
+        "sun_limit": total_sun <= available_sun,
+        "cell_limit": total_plants <= available_cells,
+        "has_attack": has_attack,
+        "has_defense_or_control": has_support,
+    }
+    all_constraints_met = all(checks.values())
+
+    if combination:
+        selected_text = "、".join(
+            f"{item['name']}×{item['quantity']}" for item in combination
+        )
+        reason = (
+            f"在 {available_sun} 阳光和 {available_cells} 个格子内选择 {selected_text}，"
+            f"总评分 {total_score:.2f}；攻击与防御/控制约束均已满足。"
+        )
+    else:
+        reason = "当前阳光、格子或植物类型不足，无法同时满足全部组合约束。"
+
+    displayed_sun = _display_number(total_sun)
+    rounded_score = round(total_score, 4)
+    return {
+        "strategy": dict(strategy),
+        "combination": combination,
+        "total_sun_cost": displayed_sun,
+        "total_cost": displayed_sun,
+        "total_score": rounded_score,
+        "total_utility": rounded_score,
+        "total_plants": total_plants,
+        "score_column": score_column,
+        "constraint_checks": checks,
+        "all_constraints_met": all_constraints_met,
+        "recommendation_reason": reason,
+        "status": status,
+        "method": method,
+        "fallback_reason": fallback_reason,
+        # Temporary V1 UI compatibility; V2 no longer computes shadow prices.
+        "sun_shadow_price": 0.0,
+        "cell_shadow_price": 0.0,
+        "cost_shadow_price": 0.0,
+    }
+
+
+def _display_number(value: float) -> int | float:
+    return int(value) if float(value).is_integer() else round(float(value), 4)
+
+
+def solve(
+    plants: Sequence[Mapping[str, Any]],
+    available_sun: int = 150,
+    available_cells: int = 45,
+    budget: float | None = None,
+    zombie_factor: Mapping[str, float] | None = None,
+    deviation_data: Mapping[str, float] | None = None,
+) -> dict[str, Any]:
+    """Compatibility wrapper used by the legacy backtester."""
+
+    del budget, zombie_factor, deviation_data
+    return optimize_planting(
+        plants,
+        available_sun=available_sun,
+        available_cells=available_cells,
+    )
+
+
+def run_optimization(
+    df_plants: pd.DataFrame,
+    deviation_df: pd.DataFrame | None = None,
+    available_sun: int = 150,
+    available_cells: int = 45,
+    zombie_factor: Mapping[str, float] | None = None,
+) -> dict[str, Any]:
+    """Compatibility wrapper used by the current CLI and Streamlit page."""
+
+    del deviation_df, zombie_factor
+    return optimize_planting(
+        df_plants,
+        available_sun=available_sun,
+        available_cells=available_cells,
+    )
+
+
+def print_strategy(result: Mapping[str, Any]) -> None:
+    """Print a compact command-line recommendation summary."""
+
+    print("=" * 50)
+    print(f"Status: {result['status']}")
+    print(f"Method: {result['method']}")
+    print(f"Total plants: {result['total_plants']}")
+    print(f"Total score: {result['total_score']:.2f}")
+    print(f"Total sun cost: {result['total_sun_cost']}")
+    print("-" * 50)
+    if result["strategy"]:
+        print("Recommended combination:")
+        for plant, count in result["strategy"].items():
+            print(f"  {plant}: {count}")
+        print(result["recommendation_reason"])
+    else:
+        print("No feasible solution")
+    print("=" * 50)
