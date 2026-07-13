@@ -23,6 +23,9 @@ class ReleasePackageTests(unittest.TestCase):
             self.assertTrue(archive.is_file())
             with ZipFile(archive) as package:
                 names = set(package.namelist())
+                windows_launcher = package.read(
+                    "pvz-economy-engine-v2.0.0-test/start_windows.bat"
+                )
 
         prefix = "pvz-economy-engine-v2.0.0-test/"
         expected = {
@@ -39,6 +42,11 @@ class ReleasePackageTests(unittest.TestCase):
         }
         self.assertTrue(expected.issubset(names))
         self.assertFalse(any("backtester" in name or "airflow" in name for name in names))
+        self.assertTrue(windows_launcher.isascii())
+        self.assertIn(b"\r\n", windows_launcher)
+        self.assertNotIn(b"\n", windows_launcher.replace(b"\r\n", b""))
+        self.assertIn(b"startup.log", windows_launcher)
+        self.assertIn(b"--server.address localhost", windows_launcher)
 
 
 if __name__ == "__main__":

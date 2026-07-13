@@ -1,8 +1,15 @@
-# 末日菜园作战室 V2.0.0
+# 末日菜园作战室 V2.0.1
 
-首个可下载运行版本。解压后按照 `README_FIRST.txt` 启动即可。
+Windows 启动补丁版。解压后按照 `README_FIRST.txt` 启动即可。
 
-## 本次内容
+## Windows 启动修复
+
+- 修复 `start_windows.bat` 在部分中文 Windows 环境中因 CMD 编码解析而直接退出的问题；
+- 兼容检测 `py` / `python`，已安装的依赖不再每次重复安装；
+- 启动失败时保留窗口，并生成 `startup.log`；
+- 发布包中的批处理强制使用 Windows CRLF 换行。
+
+## V2.0 功能
 
 - 北京新发地菜价作为默认示例和离线 fallback；
 - 支持上传任意地区 CSV，并按当地菜价重新评分；

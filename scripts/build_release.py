@@ -53,7 +53,14 @@ def build_release(version: str, output_directory: Path) -> Path:
     with ZipFile(archive_path, "w", compression=ZIP_DEFLATED, compresslevel=9) as archive:
         for path in sorted(set(files)):
             relative = path.relative_to(ROOT).as_posix()
-            archive.write(path, f"{folder_name}/{relative}")
+            archive_name = f"{folder_name}/{relative}"
+            if path.suffix.lower() == ".bat":
+                # cmd.exe is fussy about launcher encoding and line endings.
+                # Normalize the release copy even when Actions builds on Linux.
+                content = path.read_text(encoding="ascii").replace("\r\n", "\n")
+                archive.writestr(archive_name, content.replace("\n", "\r\n"))
+            else:
+                archive.write(path, archive_name)
     return archive_path
 
 
