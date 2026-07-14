@@ -25,6 +25,18 @@ class DashboardModelTests(unittest.TestCase):
         self.assertEqual(len(model["reasons"]), len(model["result"]["combination"]))
         self.assertEqual(model["result"]["score_column"], "apocalypse_index")
         self.assertEqual(model["score_label"], "末日性价比指数")
+        self.assertEqual(model["price_unit"], "元/kg")
+        comparison = model["candidate_comparison"]
+        self.assertEqual(len(comparison), 15)
+        self.assertTrue(comparison["has_price"].all())
+        self.assertTrue(
+            comparison["apocalypse_index"].is_monotonic_decreasing
+        )
+        selected_names = set(model["result"]["strategy"])
+        self.assertSetEqual(
+            set(comparison.loc[comparison["selected"], "name"]),
+            selected_names,
+        )
 
     def test_every_zombie_mode_can_refresh_a_recommendation(self) -> None:
         scores = []
@@ -56,6 +68,13 @@ class DashboardModelTests(unittest.TestCase):
         self.assertGreaterEqual(model["coverage"]["matched_plants"], 2)
         self.assertLess(model["coverage"]["matched_plants"], 15)
         self.assertTrue(model["result"]["all_constraints_met"])
+        comparison = model["candidate_comparison"]
+        unmapped = comparison.loc[~comparison["has_price"]]
+        self.assertFalse(unmapped.empty)
+        self.assertTrue(unmapped["current_price"].isna().all())
+        self.assertTrue(unmapped["historical_mean"].isna().all())
+        self.assertTrue(unmapped["apocalypse_index"].isna().all())
+        self.assertTrue(unmapped["price_unit"].isna().all())
 
 
 class StreamlitAppTests(unittest.TestCase):
@@ -67,15 +86,22 @@ class StreamlitAppTests(unittest.TestCase):
             return None
         return AppTest.from_file(str(ROOT / "app.py"))
 
+    @staticmethod
+    def rendered_html(app) -> str:
+        return "\n".join(item.value for item in app.markdown)
+
     def test_app_source_declares_required_dashboard_sections(self) -> None:
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         required_labels = (
-            "阳光计数器",
             "僵尸模式",
-            "植物推荐卡片",
-            "草坪网格布局",
-            "菜价趋势与推荐排行",
-            "推荐理由解释",
+            "本轮建议种植",
+            "全部候选植物对比",
+            "价格与评分",
+            "作战属性",
+            "推荐原因",
+            "市场数据和趋势",
+            "模型说明与技术细节",
+            "相对比较指数",
             "上传地区菜价 CSV",
             "下载 CSV 模板",
             "🚀 开始分析",
@@ -84,6 +110,18 @@ class StreamlitAppTests(unittest.TestCase):
         for label in required_labels:
             with self.subTest(label=label):
                 self.assertIn(label, source)
+
+        ordered_calls = (
+            "render_hero(model)",
+            "render_recommendation_summary(model, available_sun, available_cells)",
+            "render_candidate_comparison(model)",
+            "render_seed_cards(model)",
+            "render_reasons(model)",
+            "render_market_section(model)",
+            "render_technical_details(model)",
+        )
+        positions = [source.index(call, source.index("def main()")) for call in ordered_calls]
+        self.assertEqual(positions, sorted(positions))
 
     def test_app_waits_for_explicit_analysis(self) -> None:
         app_test = self.load_app_test()
@@ -105,7 +143,26 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertEqual(app.session_state["analysis_params"]["available_sun"], 150)
         self.assertEqual(app.session_state["analysis_params"]["available_cells"], 20)
         self.assertFalse(app.session_state["analysis_params"]["uses_uploaded_csv"])
-        self.assertTrue(any("hero-panel" in item.value for item in app.markdown))
+        html = self.rendered_html(app)
+        self.assertIn("hero-panel", html)
+        self.assertIn("recommendation-summary is-success", html)
+        self.assertIn("✓ 分析完成", html)
+        self.assertIn("阳光消耗", html)
+        self.assertIn("已用格子", html)
+        self.assertIn("相对比较指数", html)
+        for item in app.session_state["analysis_model"]["result"]["combination"]:
+            with self.subTest(plant=item["name"]):
+                self.assertIn(item["name"], html)
+                self.assertIn(f"× {item['quantity']}", html)
+                row = app.session_state["analysis_model"]["ranking"].set_index("name").loc[item["name"]]
+                self.assertIn(row["vegetable_name"], html)
+                self.assertIn(
+                    f"{row['current_price']:.2f} {app.session_state['analysis_model']['price_unit']}",
+                    html,
+                )
+                self.assertIn(f"{row['apocalypse_index']:.4f}", html)
+        self.assertEqual(app.expander[0].label, "查看推荐植物作战卡与草坪布局")
+        self.assertEqual(app.expander[1].label, "模型说明与技术细节")
 
     def test_unsubmitted_form_changes_keep_last_result(self) -> None:
         app_test = self.load_app_test()
@@ -154,6 +211,58 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertTrue(app.session_state["analysis_error"])
         self.assertNotIn("analysis_model", app.session_state.filtered_state)
         self.assertEqual(len(app.error), 1)
+
+    def test_partial_user_csv_has_success_and_coverage_states(self) -> None:
+        app_test = self.load_app_test()
+        if app_test is None:
+            self.skipTest("当前 Streamlit 版本不包含 AppTest")
+
+        content = (ROOT / "data" / "templates" / "regional_prices_template.csv").read_bytes()
+        app = app_test.run(timeout=30)
+        app.sidebar.file_uploader[0].upload("region.csv", content, "text/csv")
+        app.run(timeout=30)
+        app.sidebar.button[0].click()
+        app.run(timeout=30)
+
+        self.assertEqual(len(app.exception), 0)
+        model = app.session_state["analysis_model"]
+        self.assertTrue(model["result"]["all_constraints_met"])
+        self.assertTrue(model["coverage"]["excluded_plants"])
+        html = self.rendered_html(app)
+        self.assertIn("recommendation-summary is-success", html)
+        self.assertIn("部分菜价已成功映射", html)
+        self.assertIn("用户上传", model["data_source"])
+
+    def test_infeasible_user_csv_has_independent_error_state(self) -> None:
+        app_test = self.load_app_test()
+        if app_test is None:
+            self.skipTest("当前 Streamlit 版本不包含 AppTest")
+
+        content = (
+            "date,name,price,unit\n"
+            "2026-07-07,豌豆,4.00,元/kg\n"
+            "2026-07-08,豌豆,4.10,元/kg\n"
+            "2026-07-09,豌豆,4.05,元/kg\n"
+            "2026-07-10,豌豆,4.20,元/kg\n"
+            "2026-07-11,豌豆,4.15,元/kg\n"
+            "2026-07-12,豌豆,4.08,元/kg\n"
+            "2026-07-13,豌豆,4.12,元/kg\n"
+        ).encode("utf-8")
+        app = app_test.run(timeout=30)
+        app.sidebar.file_uploader[0].upload("attack-only.csv", content, "text/csv")
+        app.run(timeout=30)
+        app.sidebar.button[0].click()
+        app.run(timeout=30)
+
+        self.assertEqual(len(app.exception), 0)
+        model = app.session_state["analysis_model"]
+        self.assertFalse(model["result"]["all_constraints_met"])
+        self.assertFalse(model["result"]["combination"])
+        html = self.rendered_html(app)
+        self.assertIn("recommendation-summary is-infeasible", html)
+        self.assertIn("本轮暂无可行种植方案", html)
+        self.assertIn("方案不可行", html)
+        self.assertIn("部分菜价已成功映射", html)
 
 
 if __name__ == "__main__":

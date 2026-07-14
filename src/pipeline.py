@@ -17,7 +17,7 @@ from src.crawler import (
     load_local_fallback,
 )
 from src.features import add_price_features
-from src.preprocess import clean_price_data
+from src.preprocess import NORMALIZED_PRICE_UNIT, clean_price_data
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -103,7 +103,7 @@ def run_data_pipeline(
         "vegetables": int(featured["name"].nunique()),
         "date_min": featured["date"].min().strftime("%Y-%m-%d"),
         "date_max": featured["date"].max().strftime("%Y-%m-%d"),
-        "price_unit": "CNY/kg",
+        "price_unit": NORMALIZED_PRICE_UNIT,
         "history_window_days": history_window,
     }
     metadata_target.write_text(
@@ -140,6 +140,7 @@ def load_or_build_processed_prices(
             prefer_network=prefer_network,
             processed_path=target,
         ).data
+    data.attrs["price_unit"] = NORMALIZED_PRICE_UNIT
     return data
 
 

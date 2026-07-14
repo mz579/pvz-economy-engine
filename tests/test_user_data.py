@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.user_data import prepare_uploaded_price_data, read_price_csv_bytes
+from src.preprocess import NORMALIZED_PRICE_UNIT
 
 
 class UserPriceDataTests(unittest.TestCase):
@@ -30,6 +31,7 @@ class UserPriceDataTests(unittest.TestCase):
         result = prepare_uploaded_price_data(content, region_name="西安")
         self.assertEqual(result.iloc[0]["price"], 5.0)
         self.assertEqual(result.iloc[0]["source"], "user_upload:西安")
+        self.assertEqual(result.attrs["price_unit"], NORMALIZED_PRICE_UNIT)
 
     def test_empty_upload_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "空文件"):

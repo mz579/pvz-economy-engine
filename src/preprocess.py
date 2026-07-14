@@ -8,6 +8,7 @@ import pandas as pd
 
 
 STANDARD_COLUMNS = ("date", "name", "price", "source")
+NORMALIZED_PRICE_UNIT = "元/kg"
 
 COLUMN_ALIASES = {
     "日期": "date",
@@ -65,7 +66,9 @@ def clean_price_data(
     """
 
     if data.empty:
-        return pd.DataFrame(columns=list(STANDARD_COLUMNS))
+        empty = pd.DataFrame(columns=list(STANDARD_COLUMNS))
+        empty.attrs["price_unit"] = NORMALIZED_PRICE_UNIT
+        return empty
 
     result = data.copy().rename(columns=COLUMN_ALIASES)
     _require_columns(result.columns)
@@ -98,7 +101,9 @@ def clean_price_data(
         .mean()
         .loc[:, list(STANDARD_COLUMNS)]
     )
-    return result.sort_values(["name", "date", "source"]).reset_index(drop=True)
+    result = result.sort_values(["name", "date", "source"]).reset_index(drop=True)
+    result.attrs["price_unit"] = NORMALIZED_PRICE_UNIT
+    return result
 
 
 def standardize_price_data(
