@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
+import re
 import sys
 import unittest
 
@@ -76,6 +78,26 @@ class DashboardModelTests(unittest.TestCase):
         self.assertTrue(unmapped["apocalypse_index"].isna().all())
         self.assertTrue(unmapped["price_unit"].isna().all())
 
+    def test_display_lawn_matches_capacity_and_recommendation_quantities(self) -> None:
+        from app import build_lawn_slots
+
+        available_cells = 20
+        model = build_dashboard_model("均衡巡逻", 150, available_cells)
+        slots = build_lawn_slots(model, available_cells)
+        occupied = [slot for slot in slots if slot["occupied"]]
+
+        self.assertEqual(len(slots), available_cells)
+        self.assertEqual(len(occupied), model["result"]["total_plants"])
+        self.assertEqual(
+            Counter(str(slot["name"]) for slot in occupied),
+            Counter(
+                {
+                    item["name"]: int(item["quantity"])
+                    for item in model["result"]["combination"]
+                }
+            ),
+        )
+
 
 class StreamlitAppTests(unittest.TestCase):
     @staticmethod
@@ -100,6 +122,9 @@ class StreamlitAppTests(unittest.TestCase):
             "作战属性",
             "推荐原因",
             "市场数据和趋势",
+            "市场情报",
+            "阵容展示布局",
+            "非优化器计算出的最优坐标",
             "模型说明与技术细节",
             "相对比较指数",
             "上传地区菜价 CSV",
@@ -114,9 +139,8 @@ class StreamlitAppTests(unittest.TestCase):
         ordered_calls = (
             "render_hero(model)",
             "render_recommendation_summary(model, available_sun, available_cells)",
-            "render_candidate_comparison(model)",
-            "render_seed_cards(model)",
             "render_reasons(model)",
+            "render_candidate_comparison(model)",
             "render_market_section(model)",
             "render_technical_details(model)",
         )
@@ -144,11 +168,17 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertEqual(app.session_state["analysis_params"]["available_cells"], 20)
         self.assertFalse(app.session_state["analysis_params"]["uses_uploaded_csv"])
         html = self.rendered_html(app)
-        self.assertIn("hero-panel", html)
+        self.assertIn("terminal-header", html)
         self.assertIn("recommendation-summary is-success", html)
+        self.assertIn("resource-strip", html)
+        self.assertIn("deployment-stage", html)
+        self.assertIn("roster-sheet", html)
+        self.assertIn("lawn-panel", html)
+        self.assertIn("阵容展示布局", html)
+        self.assertIn("非优化器计算出的最优坐标", html)
         self.assertIn("✓ 分析完成", html)
         self.assertIn("阳光消耗", html)
-        self.assertIn("已用格子", html)
+        self.assertIn("草坪占用", html)
         self.assertIn("相对比较指数", html)
         for item in app.session_state["analysis_model"]["result"]["combination"]:
             with self.subTest(plant=item["name"]):
@@ -161,8 +191,17 @@ class StreamlitAppTests(unittest.TestCase):
                     html,
                 )
                 self.assertIn(f"{row['apocalypse_index']:.4f}", html)
-        self.assertEqual(app.expander[0].label, "查看推荐植物作战卡与草坪布局")
-        self.assertEqual(app.expander[1].label, "模型说明与技术细节")
+                self.assertEqual(
+                    html.count(f'data-plant="{item["name"]}"'),
+                    int(item["quantity"]),
+                )
+        self.assertEqual(html.count('class="lawn-cell '), 20)
+        self.assertEqual(
+            html.count('class="lawn-cell is-occupied"'),
+            app.session_state["analysis_model"]["result"]["total_plants"],
+        )
+        self.assertEqual(len(app.expander), 1)
+        self.assertEqual(app.expander[0].label, "模型说明与技术细节")
 
     def test_unsubmitted_form_changes_keep_last_result(self) -> None:
         app_test = self.load_app_test()
@@ -232,6 +271,33 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertIn("recommendation-summary is-success", html)
         self.assertIn("部分菜价已成功映射", html)
         self.assertIn("用户上传", model["data_source"])
+
+    def test_visual_tokens_keep_sidebar_text_at_wcag_aa(self) -> None:
+        def channel(value: int) -> float:
+            normalized = value / 255
+            return (
+                normalized / 12.92
+                if normalized <= 0.04045
+                else ((normalized + 0.055) / 1.055) ** 2.4
+            )
+
+        def luminance(hex_color: str) -> float:
+            red, green, blue = (
+                int(hex_color[index : index + 2], 16)
+                for index in (1, 3, 5)
+            )
+            return 0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue)
+
+        def contrast(foreground: str, background: str) -> float:
+            light, dark = sorted(
+                (luminance(foreground), luminance(background)), reverse=True
+            )
+            return (light + 0.05) / (dark + 0.05)
+
+        style = (ROOT / "assets" / "style.css").read_text(encoding="utf-8")
+        self.assertNotRegex(style, re.compile(r"letter-spacing\s*:\s*-"))
+        self.assertGreaterEqual(contrast("#F1F4DF", "#0B1811"), 4.5)
+        self.assertGreaterEqual(contrast("#A9B9A8", "#0B1811"), 4.5)
 
     def test_infeasible_user_csv_has_independent_error_state(self) -> None:
         app_test = self.load_app_test()

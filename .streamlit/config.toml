@@ -5,3 +5,11 @@ showEmailPrompt = false
 
 [browser]
 gatherUsageStats = false
+
+[theme]
+base = "dark"
+primaryColor = "#F6C84C"
+backgroundColor = "#08120D"
+secondaryBackgroundColor = "#0E1D16"
+textColor = "#F1F4DF"
+font = "sans-serif"

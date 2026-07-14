@@ -163,20 +163,36 @@ def render_waiting_state() -> None:
 
 
 def render_hero(model: dict) -> None:
-    """Render a compact title bar that leaves room for the actual answer."""
+    """Render the compact command terminal header for the submitted analysis."""
 
     mode = model["mode"]
+    result = model["result"]
+    if st.session_state.get(ANALYSIS_ERROR_KEY):
+        status_class = "is-warning"
+        status_icon = "⚠"
+        status_text = "输入待修正"
+    elif result["all_constraints_met"]:
+        status_class = "is-success"
+        status_icon = "✓"
+        status_text = "分析完成"
+    else:
+        status_class = "is-error"
+        status_icon = "!"
+        status_text = "方案不可行"
     st.markdown(
         f"""
-        <section class="hero-panel">
-          <div class="hero-copy">
-            <div class="eyebrow">🌱 PVZ ECONOMY ENGINE · V2.0</div>
+        <section class="terminal-header" aria-label="末日菜园作战终端">
+          <div class="terminal-brand">
+            <div class="terminal-kicker">GARDEN DEFENSE CONSOLE · V2.0</div>
             <h1>末日菜园作战室</h1>
           </div>
-          <div class="hero-context" aria-label="当前分析场景">
-            <strong>{escape(mode['icon'])} {escape(model['zombie_mode'])}</strong>
-            <span>{escape(mode['description'])}</span>
-            <small>📡 {escape(model['data_source'])} · {model['latest_date'].strftime('%Y-%m-%d')}</small>
+          <div class="terminal-readout" aria-label="当前分析场景">
+            <span><small>当前模式</small><strong>{escape(mode['icon'])} {escape(model['zombie_mode'])}</strong></span>
+            <span><small>情报来源</small><strong>{escape(model['data_source'])}</strong></span>
+            <span><small>数据日期</small><strong>{model['latest_date'].strftime('%Y-%m-%d')}</strong></span>
+            <span class="terminal-status {status_class}" role="status">
+              <small>分析状态</small><strong>{status_icon} {status_text}</strong>
+            </span>
           </div>
         </section>
         """,
@@ -184,12 +200,34 @@ def render_hero(model: dict) -> None:
     )
 
 
+def build_lawn_slots(model: dict, available_cells: int) -> list[dict[str, object]]:
+    """Expand the recommendation into an exact-capacity display-only lawn."""
+
+    slots: list[dict[str, object]] = []
+    for item in model["result"]["combination"]:
+        quantity = int(item["quantity"])
+        for _ in range(quantity):
+            slots.append(
+                {
+                    "name": str(item["name"]),
+                    "emoji": PLANT_EMOJI.get(item["name"], "🌱"),
+                    "occupied": True,
+                }
+            )
+    slots = slots[:available_cells]
+    slots.extend(
+        {"name": "空格", "emoji": "", "occupied": False}
+        for _ in range(available_cells - len(slots))
+    )
+    return slots
+
+
 def render_recommendation_summary(
     model: dict,
     available_sun: int,
     available_cells: int,
 ) -> None:
-    """Put the complete answer and its resource footprint above the fold."""
+    """Put the complete order, resources and display lawn above the fold."""
 
     result = model["result"]
     feasible = bool(result["all_constraints_met"])
@@ -205,60 +243,101 @@ def render_recommendation_summary(
             row = ranking.loc[item["name"]]
             unit = model["price_unit"]
             planting_cards.append(
-                f'<article class="recommendation-plant-card" '
+                f'<article class="roster-card" '
                 f'aria-label="{escape(item["name"])} {item["quantity"]} 株">'
-                f'<div class="recommendation-plant-title">'
-                f'<span class="planting-emoji" aria-hidden="true">'
+                f'<div class="roster-identity">'
+                f'<span class="roster-emoji" aria-hidden="true">'
                 f'{PLANT_EMOJI.get(item["name"], "🌱")}</span>'
                 f'<div><strong>{escape(item["name"])}</strong>'
+                f'<span>{escape(str(row["vegetable_name"]))} · {escape(str(row["role"]))}</span></div>'
                 f'<b>× {item["quantity"]}</b></div>'
-                f'<em>评分排名 #{int(row["rank"])}</em></div>'
-                f'<div class="recommendation-plant-facts">'
-                f'<span><small>对应蔬菜</small><strong>{escape(str(row["vegetable_name"]))}</strong></span>'
-                f'<span><small>当前价格</small><strong>{escape(format_price(row["current_price"], unit))}</strong></span>'
-                f'<span><small>样本平均价</small><strong>{escape(format_price(row["historical_mean"], unit))}</strong></span>'
-                f'<span><small>阳光成本</small><strong>{item["unit_sun_cost"]} / 株</strong></span>'
-                f'<span><small>相对评分</small><strong>{row["apocalypse_index"]:.4f}</strong></span>'
+                f'<div class="roster-market">'
+                f'<span><small>当前单价</small><strong>{escape(format_price(row["current_price"], unit))}</strong></span>'
+                f'<span><small>样本均价</small><strong>{escape(format_price(row["historical_mean"], unit))}</strong></span>'
+                f'</div>'
+                f'<div class="roster-metrics">'
+                f'<span>☀ {item["unit_sun_cost"]} / 株</span>'
+                f'<span>相对评分 {row["apocalypse_index"]:.4f}</span>'
+                f'<span>排名 #{int(row["rank"])}</span>'
                 f'</div></article>'
             )
         planting_html = "".join(planting_cards)
-        summary_copy = "完整组合已列出；修改左侧参数后，需要再次点击分析才会更新。"
+        summary_copy = "结果对应最近一次提交；左侧参数修改后，再次点击“开始分析”才会更新。"
     else:
         planting_html = (
-            '<div class="infeasible-copy">'
-            f'{escape(result["recommendation_reason"])} 请调整阳光、格子或菜价覆盖后重新分析。'
+            '<div class="infeasible-copy" role="alert">'
+            '<strong>当前配置无法组成合法阵容</strong>'
+            f'<p>{escape(result["recommendation_reason"])} 请调整阳光、格子或菜价覆盖后重新分析。</p>'
             '</div>'
         )
         summary_copy = "系统没有隐藏结果：当前条件确实无法同时满足攻击与防御/控制要求。"
 
     score_value = f'{result["total_score"]:.2f}' if feasible else "—"
     resource_html = "".join(
-        f'<div class="summary-resource">'
-        f'<span>{icon} {escape(label)}</span>'
-        f'<strong>{escape(value)}</strong>'
+        f'<div class="resource-counter">'
+        f'<span aria-hidden="true">{icon}</span>'
+        f'<div><small>{escape(label)}</small><strong>{escape(value)}</strong></div>'
         f'</div>'
         for icon, label, value in (
-            ("☀️", "阳光消耗", f"{result['total_sun_cost']} / {available_sun}"),
-            ("▦", "已用格子", f"{result['total_plants']} / {available_cells}"),
-            ("🏆", "相对比较指数", score_value),
+            ("☀", "阳光消耗", f"{result['total_sun_cost']} / {available_sun}"),
+            ("▦", "草坪占用", f"{result['total_plants']} / {available_cells}"),
+            ("◆", "组合相对比较指数", score_value),
+            (
+                "◎",
+                "菜价映射",
+                f"{model['coverage']['matched_plants']} / {model['coverage']['total_plants']}",
+            ),
         )
     )
+
+    lawn_cells = []
+    for index, slot in enumerate(build_lawn_slots(model, available_cells), start=1):
+        if bool(slot["occupied"]):
+            name = escape(str(slot["name"]))
+            lawn_cells.append(
+                f'<div class="lawn-cell is-occupied" data-slot="{index}" '
+                f'data-plant="{name}" title="第 {index} 格：{name}" '
+                f'aria-label="第 {index} 格，{name}">'
+                f'<span aria-hidden="true">{slot["emoji"]}</span><small>{name}</small></div>'
+            )
+        else:
+            lawn_cells.append(
+                f'<div class="lawn-cell is-empty" data-slot="{index}" '
+                f'title="第 {index} 格：空位" aria-label="第 {index} 格，空位">'
+                f'<span aria-hidden="true">·</span><small>空位</small></div>'
+            )
+    lawn_html = "".join(lawn_cells)
+    occupied_count = int(result["total_plants"]) if feasible else 0
+
     st.markdown(
         f"""
-        <section class="recommendation-summary {state_class}" aria-label="本轮建议种植">
+        <section class="recommendation-summary {state_class}" aria-label="本轮阵容与草坪部署">
           <div class="recommendation-heading">
             <div>
-              <span class="result-kicker">CURRENT PLANTING ORDER</span>
+              <span class="result-kicker">CURRENT SQUAD</span>
               <h2>{heading}</h2>
             </div>
             <span class="result-state {state_class}" role="status">{state_icon} {state_title}</span>
           </div>
-          <div class="planting-list">{planting_html}</div>
-          <p class="summary-copy">{summary_copy}</p>
-          <div class="summary-resource-grid">{resource_html}</div>
-          <p class="index-explainer"><strong>相对比较指数：</strong>
-          只用于当前候选植物之间比较，数值越高表示当前模型下越值得选择；
-          它不是百分制、收益率或成功概率。</p>
+          <div class="resource-strip">{resource_html}</div>
+          <div class="deployment-stage">
+            <section class="roster-sheet" aria-label="推荐植物清单">
+              <header><span>本轮阵容</span><strong>{len(result['combination'])} 种 / {result['total_plants']} 株</strong></header>
+              <div class="roster-list">{planting_html}</div>
+              <p class="summary-copy">{summary_copy}</p>
+            </section>
+            <section class="lawn-panel" aria-label="阵容展示布局">
+              <header>
+                <div><span>LAWN DEPLOYMENT</span><strong>阵容展示布局</strong></div>
+                <b>{occupied_count} / {available_cells} 格</b>
+              </header>
+              <div class="lawn-direction" aria-hidden="true"><span>后方</span><i></i><span>前线</span></div>
+              <div class="lawn-board">{lawn_html}</div>
+              <p>格子仅用于数量核对，非优化器计算出的最优坐标。</p>
+            </section>
+          </div>
+          <div class="index-explainer"><strong>◆ 相对比较指数</strong><span>
+          仅用于当前候选植物之间比较；越高表示当前模型下越值得选择。它不是百分制、收益率或成功概率。</span></div>
         </section>
         """,
         unsafe_allow_html=True,
@@ -293,9 +372,9 @@ def render_candidate_comparison(model: dict) -> None:
     coverage = model["coverage"]
     unmatched_count = coverage["total_plants"] - coverage["matched_plants"]
     section_header(
-        "CANDIDATE BOARD",
-        "全部候选植物对比",
-        "默认按单株相对评分从高到低排列；未映射植物保留作战属性，但不伪造价格或评分。",
+        "MARKET INTELLIGENCE",
+        "市场情报",
+        "先核对本轮数据口径，再比较全部候选植物。未映射项目保留作战属性，但不伪造价格或评分。",
     )
     st.markdown(
         f"""
@@ -306,6 +385,37 @@ def render_candidate_comparison(model: dict) -> None:
           <span><small>数据来源</small><strong>{escape(model['data_source'])}</strong></span>
           <span><small>使用模式</small><strong>{escape(model['data_mode'])}</strong></span>
           <span><small>映射覆盖</small><strong>{coverage['matched_plants']} 已映射 / {unmatched_count} 未映射</strong></span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    ranking = model["ranking"]
+    top_row = ranking.iloc[0]
+    selected_ranks = sorted(
+        int(row["rank"])
+        for _, row in ranking.loc[
+            ranking["name"].isin(model["result"]["strategy"])
+        ].iterrows()
+    )
+    selected_rank_text = (
+        "、".join(f"#{rank_value}" for rank_value in selected_ranks)
+        if selected_ranks
+        else "暂无"
+    )
+    st.markdown(
+        f"""
+        <div class="intel-strip" aria-label="市场情报摘要">
+          <span><small>当前评分首位</small><strong>{escape(str(top_row['name']))}</strong>
+          <em>{top_row['apocalypse_index']:.4f}</em></span>
+          <span><small>本轮入选排名</small><strong>{escape(selected_rank_text)}</strong>
+          <em>按单株相对评分</em></span>
+          <span><small>样本菜品</small><strong>{model['prices']['name'].nunique()} 种</strong>
+          <em>{len(model['prices'])} 条价格记录</em></span>
+        </div>
+        <div class="table-heading">
+          <div><span>CANDIDATE BOARD</span><strong>全部候选植物对比</strong></div>
+          <p>默认按单株相对评分从高到低排列</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -395,55 +505,6 @@ def render_constraint_bar(result: dict) -> None:
     st.markdown(f'<div class="constraint-row">{chips}</div>', unsafe_allow_html=True)
 
 
-def render_seed_cards(model: dict) -> None:
-    ranking = model["ranking"].set_index("name")
-    cards = []
-    for item in model["result"]["combination"]:
-        row = ranking.loc[item["name"]]
-        emoji = PLANT_EMOJI.get(item["name"], "🌱")
-        cards.append(
-            f'<article class="seed-card">'
-            f'<div class="seed-card-top">'
-            f'<span class="sun-cost">☀ {item["unit_sun_cost"]}</span>'
-            f'<span class="seed-count">× {item["quantity"]}</span>'
-            f'</div>'
-            f'<div class="plant-emoji" aria-hidden="true">{emoji}</div>'
-            f'<h3>{escape(item["name"])}</h3>'
-            f'<p class="plant-role">{escape(str(row["role"]))}</p>'
-            f'<div class="seed-stats">'
-            f'<span>⚔ {int(row["attack"])}</span>'
-            f'<span>🛡 {int(row["defense"])}</span>'
-            f'<span>🌀 {int(row["control"])}</span>'
-            f'</div>'
-            f'<div class="score-strip">单株相对指数 '
-            f'<strong>{item["unit_score"]:.2f}</strong></div>'
-            f'</article>'
-        )
-    st.markdown(f'<div class="seed-grid">{"".join(cards)}</div>', unsafe_allow_html=True)
-
-
-def render_lawn(model: dict, available_cells: int) -> None:
-    slots: list[tuple[str, str]] = []
-    for item in model["result"]["combination"]:
-        emoji = PLANT_EMOJI.get(item["name"], "🌱")
-        slots.extend([(emoji, item["name"])] * int(item["quantity"]))
-    slots = slots[:available_cells]
-    slots.extend([("", "空格")] * (available_cells - len(slots)))
-
-    cells = []
-    for index, (emoji, name) in enumerate(slots, start=1):
-        if emoji:
-            cells.append(
-                f'<div class="lawn-cell occupied" title="{escape(name)}">'
-                f'<span>{emoji}</span><small>{escape(name)}</small></div>'
-            )
-        else:
-            cells.append(
-                f'<div class="lawn-cell empty" title="空格 {index}"><span>＋</span></div>'
-            )
-    st.markdown(f'<div class="lawn-board">{"".join(cells)}</div>', unsafe_allow_html=True)
-
-
 def render_reasons(model: dict) -> None:
     reason_cards = []
     for reason in model["reasons"]:
@@ -490,7 +551,9 @@ def render_market_section(model: dict) -> None:
             height=310,
             **stretch_width(st.line_chart),
         )
-        st.caption(f"{selected_vegetable} · 单位：元/kg · 来源：{model['data_source']}")
+        st.caption(
+            f"{selected_vegetable} · 单位：{model['price_unit']} · 来源：{model['data_source']}"
+        )
     with chart_right:
         top_ranking = (
             model["ranking"]
@@ -544,7 +607,7 @@ def render_technical_details(model: dict) -> None:
                 "vegetable_name": "映射蔬菜",
                 "role": "定位",
                 "sun_cost": "阳光成本",
-                "latest_price": "最新菜价(元/kg)",
+                "latest_price": f"最新菜价({model['price_unit']})",
                 "battle_value": "战斗价值",
                 "price_undervaluation": "价格低估系数",
                 "stability_coefficient": "稳定性系数",
@@ -659,19 +722,8 @@ def main() -> None:
     render_hero(model)
     render_recommendation_summary(model, available_sun, available_cells)
     render_coverage_notice(model)
-    render_candidate_comparison(model)
 
     if result["all_constraints_met"]:
-        with st.expander("查看推荐植物作战卡与草坪布局"):
-            st.caption("种植数量按模型原样展示；零阳光植物数量较多时也不会隐藏。")
-            render_seed_cards(model)
-            st.markdown(
-                '<div class="detail-subheading"><strong>草坪占位预览</strong>'
-                '<span>按当前组合填入可用格子</span></div>',
-                unsafe_allow_html=True,
-            )
-            render_lawn(model, available_cells)
-
         displayed_reason = result["recommendation_reason"].replace(
             "总评分", "相对比较指数"
         )
@@ -681,6 +733,10 @@ def main() -> None:
             displayed_reason,
         )
         render_reasons(model)
+
+    render_candidate_comparison(model)
+
+    if result["all_constraints_met"]:
         render_market_section(model)
 
     render_technical_details(model)
