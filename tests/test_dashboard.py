@@ -59,6 +59,14 @@ class DashboardModelTests(unittest.TestCase):
 
 
 class StreamlitAppTests(unittest.TestCase):
+    @staticmethod
+    def load_app_test():
+        try:
+            from streamlit.testing.v1 import AppTest
+        except ImportError:  # pragma: no cover - old supported Streamlit releases
+            return None
+        return AppTest.from_file(str(ROOT / "app.py"))
+
     def test_app_source_declares_required_dashboard_sections(self) -> None:
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         required_labels = (
@@ -70,23 +78,82 @@ class StreamlitAppTests(unittest.TestCase):
             "推荐理由解释",
             "上传地区菜价 CSV",
             "下载 CSV 模板",
+            "🚀 开始分析",
+            "等待作战配置",
         )
         for label in required_labels:
             with self.subTest(label=label):
                 self.assertIn(label, source)
 
-    def test_app_starts_and_refreshes_after_parameter_change(self) -> None:
-        try:
-            from streamlit.testing.v1 import AppTest
-        except ImportError:  # pragma: no cover - old supported Streamlit releases
+    def test_app_waits_for_explicit_analysis(self) -> None:
+        app_test = self.load_app_test()
+        if app_test is None:
             self.skipTest("当前 Streamlit 版本不包含 AppTest")
 
-        app = AppTest.from_file(str(ROOT / "app.py")).run(timeout=30)
+        app = app_test.run(timeout=30)
         self.assertEqual(len(app.exception), 0)
-        app.sidebar.selectbox[0].select("尸潮来袭")
+        self.assertEqual(len(app.sidebar.button), 1)
+        self.assertEqual(app.sidebar.button[0].label, "🚀 开始分析")
+        self.assertEqual(app.sidebar.button[0].proto.type, "primary")
+        self.assertNotIn("analysis_model", app.session_state.filtered_state)
+        self.assertTrue(any("等待作战配置" in item.value for item in app.markdown))
+
+        app.sidebar.button[0].click()
+        app.run(timeout=30)
+        self.assertEqual(len(app.exception), 0)
+        self.assertIn("analysis_model", app.session_state.filtered_state)
+        self.assertEqual(app.session_state["analysis_params"]["available_sun"], 150)
+        self.assertEqual(app.session_state["analysis_params"]["available_cells"], 20)
+        self.assertFalse(app.session_state["analysis_params"]["uses_uploaded_csv"])
+        self.assertTrue(any("hero-panel" in item.value for item in app.markdown))
+
+    def test_unsubmitted_form_changes_keep_last_result(self) -> None:
+        app_test = self.load_app_test()
+        if app_test is None:
+            self.skipTest("当前 Streamlit 版本不包含 AppTest")
+
+        app = app_test.run(timeout=30)
+        app.sidebar.button[0].click()
+        app.run(timeout=30)
+        original_score = app.session_state["analysis_model"]["result"]["total_score"]
+
         app.sidebar.slider[0].set_value(200)
         app.run(timeout=30)
         self.assertEqual(len(app.exception), 0)
+        self.assertEqual(app.sidebar.slider[0].value, 200)
+        self.assertEqual(app.session_state["analysis_params"]["available_sun"], 150)
+        self.assertEqual(
+            app.session_state["analysis_model"]["result"]["total_score"],
+            original_score,
+        )
+
+        app.sidebar.button[0].click()
+        app.run(timeout=30)
+        self.assertEqual(len(app.exception), 0)
+        self.assertEqual(app.session_state["analysis_params"]["available_sun"], 200)
+
+    def test_invalid_csv_error_only_appears_after_submit(self) -> None:
+        app_test = self.load_app_test()
+        if app_test is None:
+            self.skipTest("当前 Streamlit 版本不包含 AppTest")
+
+        app = app_test.run(timeout=30)
+        app.sidebar.file_uploader[0].upload(
+            "invalid.csv",
+            b"unexpected\nvalue\n",
+            "text/csv",
+        )
+        app.run(timeout=30)
+        self.assertEqual(len(app.exception), 0)
+        self.assertNotIn("analysis_error", app.session_state.filtered_state)
+        self.assertEqual(len(app.error), 0)
+
+        app.sidebar.button[0].click()
+        app.run(timeout=30)
+        self.assertEqual(len(app.exception), 0)
+        self.assertTrue(app.session_state["analysis_error"])
+        self.assertNotIn("analysis_model", app.session_state.filtered_state)
+        self.assertEqual(len(app.error), 1)
 
 
 if __name__ == "__main__":

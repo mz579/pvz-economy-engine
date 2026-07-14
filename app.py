@@ -20,6 +20,9 @@ from src.user_data import prepare_uploaded_price_data
 ROOT = Path(__file__).resolve().parent
 STYLE_PATH = ROOT / "assets" / "style.css"
 TEMPLATE_PATH = ROOT / "data" / "templates" / "regional_prices_template.csv"
+ANALYSIS_MODEL_KEY = "analysis_model"
+ANALYSIS_PARAMS_KEY = "analysis_params"
+ANALYSIS_ERROR_KEY = "analysis_error"
 
 
 @st.cache_data(show_spinner=False)
@@ -54,6 +57,79 @@ def stretch_width(component: object) -> dict[str, object]:
 
     parameters = inspect.signature(component).parameters
     return {"width": "stretch"} if "width" in parameters else {"use_container_width": True}
+
+
+def build_submitted_dashboard_model(
+    zombie_mode: str,
+    available_sun: int,
+    available_cells: int,
+    region_name: str,
+    uploaded_file: object | None,
+) -> dict:
+    """Calculate a model only for an explicit form submission."""
+
+    if uploaded_file is None:
+        return get_dashboard_model(zombie_mode, available_sun, available_cells)
+    return get_uploaded_dashboard_model(
+        zombie_mode,
+        available_sun,
+        available_cells,
+        region_name,
+        uploaded_file.getvalue(),
+    )
+
+
+def render_sidebar_status() -> None:
+    """Show whether the submitted configuration has a usable result."""
+
+    if st.session_state.get(ANALYSIS_ERROR_KEY):
+        css_class = "is-error"
+        icon = "!"
+        title = "配置需要修正"
+        copy = "已保留上一次成功结果；修正后请重新分析。"
+    elif st.session_state.get(ANALYSIS_MODEL_KEY) is not None:
+        css_class = "is-complete"
+        icon = "✓"
+        title = "分析完成"
+        copy = "当前结果对应最近一次提交的作战配置。"
+    else:
+        css_class = "is-waiting"
+        icon = "…"
+        title = "等待分析"
+        copy = "设置参数后点击“开始分析”。"
+
+    st.markdown(
+        f"""
+        <div class="analysis-status {css_class}" role="status">
+          <span class="analysis-status-icon">{icon}</span>
+          <span><strong>{title}</strong><small>{copy}</small></span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_waiting_state() -> None:
+    """Render the intentional pre-analysis state instead of fake results."""
+
+    st.markdown(
+        """
+        <section class="waiting-panel" role="status" aria-label="等待作战配置">
+          <div class="waiting-icon" aria-hidden="true">🌱</div>
+          <div>
+            <span class="waiting-kicker">AWAITING ORDERS</span>
+            <h1>等待作战配置</h1>
+            <p>请在左侧设置僵尸模式、阳光和草坪格子，然后点击“🚀 开始分析”。</p>
+            <div class="waiting-steps">
+              <span>1 · 设置参数</span>
+              <span>2 · 可选上传菜价</span>
+              <span>3 · 提交分析</span>
+            </div>
+          </div>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_hero(model: dict, available_sun: int, available_cells: int) -> None:
@@ -202,30 +278,62 @@ def main() -> None:
 
     with st.sidebar:
         st.markdown('<div class="sidebar-brand">🌻<strong>作战配置</strong></div>', unsafe_allow_html=True)
-        zombie_mode = st.selectbox(
-            "僵尸模式",
-            options=list(ZOMBIE_MODES),
-            help="切换敌情会调整五项战斗价值权重并重新计算推荐。",
-        )
-        st.caption(ZOMBIE_MODES[zombie_mode]["description"])
-        available_sun = st.slider("☀️ 可用阳光", 50, 500, 150, 25)
-        available_cells = st.slider("🌱 草坪格子", 5, 45, 20, 5)
-        st.markdown("### 📍 地区菜价")
-        region_name = st.text_input(
-            "地区名称",
-            value="我的地区",
-            help="例如：上海浦东、成都双流。名称只用于标记数据来源。",
-        )
-        uploaded_file = st.file_uploader(
-            "上传地区菜价 CSV",
-            type=["csv"],
-            help="支持 date/name/price/unit 或对应中文列名；价格单位支持元/kg、元/斤。",
-        )
+        with st.form("analysis_form"):
+            zombie_mode = st.selectbox(
+                "僵尸模式",
+                options=list(ZOMBIE_MODES),
+                help="提交分析后，敌情会调整五项战斗价值权重。",
+            )
+            available_sun = st.slider("☀️ 可用阳光", 50, 500, 150, 25)
+            available_cells = st.slider("🌱 草坪格子", 5, 45, 20, 5)
+            st.markdown('<div class="form-section-label">📍 地区菜价（可选）</div>', unsafe_allow_html=True)
+            region_name = st.text_input(
+                "地区名称",
+                value="我的地区",
+                help="例如：上海浦东、成都双流。名称只用于标记数据来源。",
+            )
+            uploaded_file = st.file_uploader(
+                "上传地区菜价 CSV",
+                type=["csv"],
+                help="支持 date/name/price/unit 或对应中文列名；价格单位支持元/kg、元/斤。",
+            )
+            st.caption("表单内容只会在点击按钮后生效。")
+            submitted = st.form_submit_button(
+                "🚀 开始分析",
+                type="primary",
+                **stretch_width(st.form_submit_button),
+            )
+
+        if submitted:
+            try:
+                with st.spinner("正在计算末日种植方案..."):
+                    submitted_model = build_submitted_dashboard_model(
+                        zombie_mode,
+                        available_sun,
+                        available_cells,
+                        region_name,
+                        uploaded_file,
+                    )
+            except ValueError as exc:
+                st.session_state[ANALYSIS_ERROR_KEY] = str(exc)
+            else:
+                st.session_state[ANALYSIS_MODEL_KEY] = submitted_model
+                st.session_state[ANALYSIS_PARAMS_KEY] = {
+                    "zombie_mode": zombie_mode,
+                    "available_sun": available_sun,
+                    "available_cells": available_cells,
+                    "region_name": region_name,
+                    "uses_uploaded_csv": uploaded_file is not None,
+                }
+                st.session_state[ANALYSIS_ERROR_KEY] = None
+
+        render_sidebar_status()
         st.download_button(
             "⬇️ 下载 CSV 模板",
             data=TEMPLATE_PATH.read_bytes(),
             file_name="regional_prices_template.csv",
             mime="text/csv",
+            **stretch_width(st.download_button),
         )
         st.markdown(
             """
@@ -238,24 +346,19 @@ def main() -> None:
         )
         st.caption("本页面只使用 emoji 与原创 CSS，不含官方游戏素材。")
 
-    try:
-        if uploaded_file is None:
-            model = get_dashboard_model(
-                zombie_mode, available_sun, available_cells
-            )
-        else:
-            model = get_uploaded_dashboard_model(
-                zombie_mode,
-                available_sun,
-                available_cells,
-                region_name,
-                uploaded_file.getvalue(),
-            )
-    except ValueError as exc:
-        st.error(f"地区菜价无法分析：{exc}")
+    analysis_error = st.session_state.get(ANALYSIS_ERROR_KEY)
+    model = st.session_state.get(ANALYSIS_MODEL_KEY)
+    if analysis_error:
+        st.error(f"地区菜价无法分析：{analysis_error}")
         st.info("可以先下载侧栏 CSV 模板，保留表头后替换成当地菜价。")
+
+    if model is None:
+        render_waiting_state()
         return
 
+    committed_params = st.session_state[ANALYSIS_PARAMS_KEY]
+    available_sun = int(committed_params["available_sun"])
+    available_cells = int(committed_params["available_cells"])
     result = model["result"]
 
     render_hero(model, available_sun, available_cells)
