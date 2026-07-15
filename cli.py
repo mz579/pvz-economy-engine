@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src import __version__
 from src.dashboard import ZOMBIE_MODES, build_dashboard_model
 from src.optimizer import print_strategy
 from src.pipeline import DEFAULT_PROCESSED_PATH, run_data_pipeline
@@ -18,7 +19,9 @@ from src.user_data import prepare_uploaded_price_data
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="PvZ Economy Engine V2.0")
+    parser = argparse.ArgumentParser(
+        description=f"PvZ Economy Engine V{__version__}"
+    )
     parser.add_argument("--sun", type=int, default=150, help="可用阳光")
     parser.add_argument("--cells", type=int, default=20, help="可用草坪格子")
     parser.add_argument(
