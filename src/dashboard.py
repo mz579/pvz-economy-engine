@@ -120,6 +120,8 @@ def build_dashboard_model(
         result,
         price_unit=price_unit,
     )
+    max_plant_share = float(result["max_plant_share"])
+    per_plant_limit = int(result["per_plant_limit"])
 
     return {
         "zombie_mode": zombie_mode,
@@ -138,6 +140,17 @@ def build_dashboard_model(
         "candidate_comparison": candidate_comparison,
         "score_label": "末日性价比指数",
         "score_notice": "战斗价值 × 价格低估系数 × 稳定性系数 ÷ 有效阳光成本",
+        "concentration_policy": {
+            "max_plant_share": max_plant_share,
+            "per_plant_limit": per_plant_limit,
+            "description": (
+                f"每种植物最多占草坪容量的 {max_plant_share:.0%}，"
+                f"本轮最多 {per_plant_limit} 株。"
+            ),
+            "is_v2_assumption": True,
+            "unused_cells": int(result["unused_cells"]),
+            "unused_cells_reason": result["unused_cells_reason"],
+        },
         "coverage": {
             "matched_plants": int(len(plants)),
             "total_plants": int(len(all_plants)),

@@ -13,7 +13,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.optimizer import optimize_planting
+from src.optimizer import (
+    DEFAULT_MAX_PLANT_SHARE,
+    calculate_per_plant_limit,
+    optimize_planting,
+)
 
 
 class PlantingOptimizerTests(unittest.TestCase):
@@ -71,6 +75,14 @@ class PlantingOptimizerTests(unittest.TestCase):
         self.assertLessEqual(result["total_plants"], cells)
         self.assertGreater(result["total_score"], 0)
         self.assertTrue(result["recommendation_reason"])
+        self.assertTrue(result["constraint_checks"]["per_plant_limit"])
+        self.assertTrue(
+            all(
+                int(quantity) <= int(result["per_plant_limit"])
+                for quantity in result["strategy"].values()
+            )
+        )
+        self.assertEqual(result["max_plant_share"], DEFAULT_MAX_PLANT_SHARE)
 
     def test_pulp_solution_respects_all_constraints(self) -> None:
         result = optimize_planting(
@@ -89,12 +101,64 @@ class PlantingOptimizerTests(unittest.TestCase):
         self.assertEqual(result["method"], "greedy")
         self.assert_valid_result(result, 75, 4)
 
-    def test_zero_cost_plant_cannot_exceed_cell_limit(self) -> None:
-        result = optimize_planting(
-            self.plants, available_sun=25, available_cells=3
+    def test_quantity_limit_uses_ceil_at_requested_lawn_sizes(self) -> None:
+        expected = {1: 1, 2: 1, 3: 1, 10: 3, 20: 6}
+        for cells, limit in expected.items():
+            with self.subTest(cells=cells):
+                self.assertEqual(calculate_per_plant_limit(cells), limit)
+
+    def test_arbitrarily_named_zero_cost_plant_is_capped_in_both_solvers(self) -> None:
+        for use_pulp in (True, False):
+            with self.subTest(use_pulp=use_pulp):
+                result = optimize_planting(
+                    self.plants,
+                    available_sun=25,
+                    available_cells=10,
+                    use_pulp=use_pulp,
+                )
+                self.assertEqual(result["per_plant_limit"], 3)
+                self.assertLessEqual(result["strategy"].get("免费攻击D", 0), 3)
+                self.assert_valid_result(result, 25, 10)
+
+    def test_low_cost_plant_and_small_candidate_pool_respect_shared_cap(self) -> None:
+        candidates = pd.DataFrame(
+            [
+                {
+                    "name": "便宜攻击苗",
+                    "sun_cost": 1,
+                    "score": 10,
+                    "attack": 8,
+                    "defense": 0,
+                    "control": 0,
+                    "category": "攻击",
+                    "role": "输出",
+                },
+                {
+                    "name": "便宜防线苗",
+                    "sun_cost": 1,
+                    "score": 5,
+                    "attack": 0,
+                    "defense": 8,
+                    "control": 0,
+                    "category": "防御",
+                    "role": "防御",
+                },
+            ]
         )
-        self.assertLessEqual(result["total_plants"], 3)
-        self.assertTrue(result["constraint_checks"]["cell_limit"])
+        for use_pulp in (True, False):
+            with self.subTest(use_pulp=use_pulp):
+                result = optimize_planting(
+                    candidates,
+                    available_sun=100,
+                    available_cells=20,
+                    use_pulp=use_pulp,
+                )
+                self.assert_valid_result(result, 100, 20)
+                self.assertEqual(result["per_plant_limit"], 6)
+                self.assertEqual(result["total_plants"], 12)
+                self.assertEqual(result["unused_cells"], 8)
+                self.assertIn("单植物数量上限", result["unused_cells_reason"])
+                self.assertTrue(all(quantity == 6 for quantity in result["strategy"].values()))
 
     def test_infeasible_resources_return_empty_combination(self) -> None:
         result = optimize_planting(

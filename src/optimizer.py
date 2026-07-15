@@ -8,6 +8,7 @@ greedy fallback still returns a constraint-checked result.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Mapping, Sequence
 import warnings
 
@@ -21,6 +22,20 @@ except ImportError:  # pragma: no cover - covered through use_pulp=False tests
 
 SCORE_COLUMN_CANDIDATES = ("apocalypse_index", "score")
 SUPPORT_SCORE_THRESHOLD = 5
+DEFAULT_MAX_PLANT_SHARE = 0.30
+
+
+def calculate_per_plant_limit(
+    available_cells: int,
+    max_plant_share: float = DEFAULT_MAX_PLANT_SHARE,
+) -> int:
+    """Return the shared V2 concentration limit for every plant species."""
+
+    if available_cells < 1:
+        raise ValueError("格子数必须至少为 1")
+    if not 0 < max_plant_share <= 1:
+        raise ValueError("单植物草坪占比必须大于 0 且不超过 1")
+    return max(1, math.ceil(available_cells * max_plant_share))
 
 
 def optimize_planting(
@@ -30,6 +45,7 @@ def optimize_planting(
     available_cells: int = 45,
     score_column: str | None = None,
     use_pulp: bool = True,
+    max_plant_share: float = DEFAULT_MAX_PLANT_SHARE,
 ) -> dict[str, Any]:
     """Return the highest-scoring feasible planting combination.
 
@@ -41,6 +57,10 @@ def optimize_planting(
 
     data, resolved_score = _prepare_plants(plants, score_column)
     _validate_limits(available_sun, available_cells)
+    per_plant_limit = calculate_per_plant_limit(
+        available_cells,
+        max_plant_share,
+    )
 
     if not data["_is_attack"].any() or not data["_is_support"].any():
         return _build_result(
@@ -49,6 +69,8 @@ def optimize_planting(
             available_sun,
             available_cells,
             resolved_score,
+            per_plant_limit,
+            max_plant_share,
             status="Infeasible",
             method="none",
             fallback_reason="植物表缺少攻击或防御/控制候选植物",
@@ -58,7 +80,10 @@ def optimize_planting(
     if use_pulp and pl is not None:
         try:
             strategy, solver_status = _solve_with_pulp(
-                data, available_sun, available_cells
+                data,
+                available_sun,
+                available_cells,
+                per_plant_limit,
             )
         except Exception as exc:  # Solver availability varies by environment.
             fallback_reason = f"PuLP 求解不可用: {exc}"
@@ -70,6 +95,8 @@ def optimize_planting(
                     available_sun,
                     available_cells,
                     resolved_score,
+                    per_plant_limit,
+                    max_plant_share,
                     status="Optimal (PuLP)",
                     method="pulp",
                 )
@@ -79,6 +106,8 @@ def optimize_planting(
                 available_sun,
                 available_cells,
                 resolved_score,
+                per_plant_limit,
+                max_plant_share,
                 status=f"Infeasible (PuLP: {solver_status})",
                 method="pulp",
             )
@@ -87,7 +116,12 @@ def optimize_planting(
     else:
         fallback_reason = "已指定使用贪心 fallback"
 
-    strategy = _solve_greedy(data, available_sun, available_cells)
+    strategy = _solve_greedy(
+        data,
+        available_sun,
+        available_cells,
+        per_plant_limit,
+    )
     if strategy is None:
         return _build_result(
             data,
@@ -95,6 +129,8 @@ def optimize_planting(
             available_sun,
             available_cells,
             resolved_score,
+            per_plant_limit,
+            max_plant_share,
             status="Infeasible (greedy fallback)",
             method="greedy",
             fallback_reason=fallback_reason,
@@ -106,6 +142,8 @@ def optimize_planting(
         available_sun,
         available_cells,
         resolved_score,
+        per_plant_limit,
+        max_plant_share,
         status="Feasible (greedy fallback)",
         method="greedy",
         fallback_reason=fallback_reason,
@@ -195,7 +233,10 @@ def _validate_limits(available_sun: int, available_cells: int) -> None:
 
 
 def _solve_with_pulp(
-    data: pd.DataFrame, available_sun: int, available_cells: int
+    data: pd.DataFrame,
+    available_sun: int,
+    available_cells: int,
+    per_plant_limit: int,
 ) -> tuple[dict[str, int], str]:
     if pl is None:
         raise RuntimeError("PuLP 未安装")
@@ -207,7 +248,7 @@ def _solve_with_pulp(
             "quantity",
             indices,
             lowBound=0,
-            upBound=available_cells,
+            upBound=per_plant_limit,
             cat=pl.LpInteger,
         )
     else:  # PuLP 2.x compatibility.
@@ -215,7 +256,7 @@ def _solve_with_pulp(
             "quantity",
             indices,
             lowBound=0,
-            upBound=available_cells,
+            upBound=per_plant_limit,
             cat=pl.LpInteger,
         )
 
@@ -258,7 +299,10 @@ def _solve_with_pulp(
 
 
 def _solve_greedy(
-    data: pd.DataFrame, available_sun: int, available_cells: int
+    data: pd.DataFrame,
+    available_sun: int,
+    available_cells: int,
+    per_plant_limit: int,
 ) -> dict[str, int] | None:
     attack_indices = data.index[data["_is_attack"]].tolist()
     support_indices = data.index[data["_is_support"]].tolist()
@@ -290,6 +334,7 @@ def _solve_greedy(
                 i
                 for i in ranked
                 if data.at[i, "_score"] > 0
+                and selected.get(i, 0) < per_plant_limit
                 and used_sun + data.at[i, "sun_cost"] <= available_sun
             ),
             None,
@@ -316,6 +361,8 @@ def _build_result(
     available_sun: int,
     available_cells: int,
     score_column: str,
+    per_plant_limit: int,
+    max_plant_share: float,
     *,
     status: str,
     method: str,
@@ -356,10 +403,20 @@ def _build_result(
     checks = {
         "sun_limit": total_sun <= available_sun,
         "cell_limit": total_plants <= available_cells,
+        "per_plant_limit": all(
+            int(quantity) <= per_plant_limit for quantity in strategy.values()
+        ),
         "has_attack": has_attack,
         "has_defense_or_control": has_support,
     }
     all_constraints_met = all(checks.values())
+
+    unused_cells = max(0, available_cells - total_plants)
+    unused_cells_reason = (
+        "剩余阳光不足，或候选植物已达到单植物数量上限。"
+        if unused_cells
+        else ""
+    )
 
     if combination:
         selected_text = "、".join(
@@ -369,6 +426,8 @@ def _build_result(
             f"在 {available_sun} 阳光和 {available_cells} 个格子内选择 {selected_text}，"
             f"总评分 {total_score:.2f}；攻击与防御/控制约束均已满足。"
         )
+        if unused_cells:
+            reason += f" 本轮保留 {unused_cells} 个空格；{unused_cells_reason}"
     else:
         reason = "当前阳光、格子或植物类型不足，无法同时满足全部组合约束。"
 
@@ -380,6 +439,10 @@ def _build_result(
         "total_sun_cost": displayed_sun,
         "total_score": rounded_score,
         "total_plants": total_plants,
+        "unused_cells": unused_cells,
+        "unused_cells_reason": unused_cells_reason,
+        "per_plant_limit": per_plant_limit,
+        "max_plant_share": max_plant_share,
         "score_column": score_column,
         "constraint_checks": checks,
         "all_constraints_met": all_constraints_met,

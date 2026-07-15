@@ -264,6 +264,7 @@ def render_recommendation_summary(
     """Put the complete order, resources and display lawn above the fold."""
 
     result = model["result"]
+    concentration = model["concentration_policy"]
     feasible = bool(result["all_constraints_met"])
     state_class = "is-success" if feasible else "is-infeasible"
     state_icon = "✓" if feasible else "!"
@@ -296,7 +297,13 @@ def render_recommendation_summary(
                 f'</div></article>'
             )
         planting_html = "".join(planting_cards)
-        summary_copy = "结果对应最近一次提交；左侧参数修改后，再次点击“开始分析”才会更新。"
+        if result["unused_cells"]:
+            summary_copy = (
+                f"本轮保留 {result['unused_cells']} 个空格；"
+                f"{result['unused_cells_reason']}空格不代表错误或不可行。"
+            )
+        else:
+            summary_copy = "结果对应最近一次提交；左侧参数修改后，再次点击“开始分析”才会更新。"
     else:
         planting_html = (
             '<div class="infeasible-copy" role="alert">'
@@ -368,6 +375,8 @@ def render_recommendation_summary(
               <div class="lawn-direction" aria-hidden="true"><span>后方</span><i></i><span>前线</span></div>
               <div class="lawn-board">{lawn_html}</div>
               <p>格子仅用于数量核对，非优化器计算出的最优坐标。</p>
+              <p><strong>集中度规则：</strong>{escape(concentration['description'])}
+              未使用位置会保留为空格，不表示错误或不可行。</p>
             </section>
           </div>
           <div class="index-explainer"><strong>◆ 相对比较指数</strong><span>
@@ -482,6 +491,7 @@ def render_constraint_bar(result: dict) -> None:
     labels = {
         "sun_limit": "阳光预算",
         "cell_limit": "格子上限",
+        "per_plant_limit": "单植物上限",
         "has_attack": "攻击植物",
         "has_defense_or_control": "防御/控制",
     }
@@ -792,6 +802,7 @@ def render_technical_details(model: dict) -> None:
                 **stretch_width(st.dataframe),
             )
         with optimizer_tab:
+            concentration = model["concentration_policy"]
             st.markdown(
                 f'<div class="technical-facts">'
                 f'<span><strong>求解方式</strong>{escape(solver_label)}</span>'
@@ -800,12 +811,18 @@ def render_technical_details(model: dict) -> None:
                 f'<span><strong>数据模式</strong>{escape(model["data_mode"])}</span>'
                 f'<span><strong>数据日期</strong>{model["latest_date"].strftime("%Y-%m-%d")}</span>'
                 f'<span><strong>映射情况</strong>{coverage["matched_plants"]} / {coverage["total_plants"]} 种植物</span>'
+                f'<span><strong>单植物上限</strong>{concentration["per_plant_limit"]} 株 / 草坪 {concentration["max_plant_share"]:.0%}</span>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
             render_constraint_bar(result)
             st.caption(
-                "约束包括阳光预算、格子上限、至少 1 个攻击植物，以及至少 1 个防御或控制植物。"
+                f"约束包括阳光预算、格子上限、每种植物最多占草坪容量的 "
+                f"{concentration['max_plant_share']:.0%}（本轮最多 "
+                f"{concentration['per_plant_limit']} 株）、至少 1 个攻击植物，以及至少 1 个防御或控制植物。"
+            )
+            st.caption(
+                "30% 是 V2 的可解释阵容集中度假设，不是现实验证出的最佳比例；优化结果允许保留空格。"
             )
             if coverage["excluded_plants"]:
                 st.info(
@@ -822,6 +839,7 @@ def render_technical_details(model: dict) -> None:
                     "求解状态": result["status"],
                     "求解方式": result["method"],
                     "约束检查": result["constraint_checks"],
+                    "集中度规则": model["concentration_policy"],
                     "评分权重": model["weights"],
                     "映射覆盖": coverage,
                 }

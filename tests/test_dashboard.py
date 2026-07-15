@@ -49,6 +49,13 @@ class DashboardModelTests(unittest.TestCase):
                 model = build_dashboard_model(mode, 200, 20)
                 self.assertTrue(model["result"]["strategy"])
                 self.assertTrue(model["result"]["all_constraints_met"])
+                self.assertEqual(model["result"]["per_plant_limit"], 6)
+                self.assertTrue(
+                    all(
+                        quantity <= model["result"]["per_plant_limit"]
+                        for quantity in model["result"]["strategy"].values()
+                    )
+                )
                 scores.append(model["result"]["total_score"])
         self.assertGreater(len(set(scores)), 1)
 
@@ -72,6 +79,7 @@ class DashboardModelTests(unittest.TestCase):
         self.assertGreaterEqual(model["coverage"]["matched_plants"], 2)
         self.assertLess(model["coverage"]["matched_plants"], 15)
         self.assertTrue(model["result"]["all_constraints_met"])
+        self.assertTrue(model["result"]["constraint_checks"]["per_plant_limit"])
         comparison = model["candidate_comparison"]
         unmapped = comparison.loc[~comparison["has_price"]]
         self.assertFalse(unmapped.empty)
@@ -91,6 +99,10 @@ class DashboardModelTests(unittest.TestCase):
         self.assertEqual(len(slots), available_cells)
         self.assertEqual(len(occupied), model["result"]["total_plants"])
         self.assertEqual(
+            len([slot for slot in slots if not slot["occupied"]]),
+            model["result"]["unused_cells"],
+        )
+        self.assertEqual(
             Counter(str(slot["name"]) for slot in occupied),
             Counter(
                 {
@@ -100,22 +112,24 @@ class DashboardModelTests(unittest.TestCase):
             ),
         )
 
-    def test_default_zero_sun_mushroom_fills_remaining_cells_truthfully(self) -> None:
+    def test_default_recommendation_respects_concentration_and_keeps_empty_cells(self) -> None:
         model = build_dashboard_model("均衡巡逻", 150, 20)
-        combination = {
-            item["name"]: item for item in model["result"]["combination"]
-        }
-        mushroom = combination["小喷菇"]
-        other_plants = sum(
-            int(item["quantity"])
-            for name, item in combination.items()
-            if name != "小喷菇"
-        )
+        result = model["result"]
 
-        self.assertEqual(mushroom["unit_sun_cost"], 0)
-        self.assertGreater(mushroom["unit_score"], 0)
-        self.assertEqual(int(mushroom["quantity"]), 20 - other_plants)
-        self.assertEqual(model["result"]["total_plants"], 20)
+        self.assertEqual(result["per_plant_limit"], 6)
+        self.assertEqual(result["max_plant_share"], 0.30)
+        self.assertDictEqual(
+            result["strategy"],
+            {"土豆雷": 5, "小喷菇": 6, "灯笼草": 1},
+        )
+        self.assertTrue(all(quantity <= 6 for quantity in result["strategy"].values()))
+        self.assertEqual(result["total_sun_cost"], 150)
+        self.assertEqual(result["total_plants"], 12)
+        self.assertEqual(result["unused_cells"], 8)
+        self.assertAlmostEqual(result["total_score"], 0.9186, places=4)
+        self.assertIn("单植物数量上限", result["unused_cells_reason"])
+        self.assertEqual(model["concentration_policy"]["per_plant_limit"], 6)
+        self.assertTrue(model["concentration_policy"]["is_v2_assumption"])
 
     def test_chart_state_handles_empty_single_constant_and_regular_data(self) -> None:
         from app import chart_data_state
@@ -171,6 +185,8 @@ class StreamlitAppTests(unittest.TestCase):
             "优化与映射",
             "调试信息",
             "相对比较指数",
+            "每种植物最多占草坪容量的",
+            "空格不代表错误或不可行",
             "上传地区菜价 CSV",
             "下载 CSV 模板",
             "🚀 开始分析",
@@ -227,6 +243,8 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertIn("阳光消耗", html)
         self.assertIn("草坪占用", html)
         self.assertIn("相对比较指数", html)
+        self.assertIn("每种植物最多占草坪容量的 30%，本轮最多 6 株", html)
+        self.assertIn("空格不代表错误或不可行", html)
         self.assertIn("reason-points", html)
         self.assertIn("当前价格", html)
         self.assertIn("为什么入选", html)
@@ -251,6 +269,10 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertEqual(
             html.count('class="lawn-cell is-occupied"'),
             app.session_state["analysis_model"]["result"]["total_plants"],
+        )
+        self.assertEqual(
+            html.count('class="lawn-cell is-empty"'),
+            app.session_state["analysis_model"]["result"]["unused_cells"],
         )
         self.assertEqual(len(app.expander), 1)
         self.assertEqual(app.expander[0].label, "模型说明与技术细节")
@@ -364,6 +386,9 @@ class StreamlitAppTests(unittest.TestCase):
             "展示布局",
             "用户 CSV",
             "离线 fallback",
+            "ceil(格子数 × 30%)",
+            "优化结果允许保留空格",
+            "组合相对比较指数为 0.9186",
         ):
             with self.subTest(statement=statement):
                 self.assertIn(statement, readme)

@@ -92,6 +92,11 @@ def main() -> int:
     ]
     print(model["ranking"].head(args.top)[columns].to_string(index=False))
     print()
+    result = model["result"]
+    print(
+        "集中度约束：每种植物最多占草坪容量的 "
+        f"{result['max_plant_share']:.0%}，本轮最多 {result['per_plant_limit']} 株。"
+    )
     print_strategy(model["result"])
 
     if model["reasons"]:

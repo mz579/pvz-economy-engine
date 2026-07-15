@@ -64,6 +64,8 @@ class UserPriceDataTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("已读取 成都 CSV", completed.stdout)
         self.assertIn("末日性价比排名", completed.stdout)
+        self.assertIn("每种植物最多占草坪容量的 30%", completed.stdout)
+        self.assertIn("本轮最多 6 株", completed.stdout)
 
 
 if __name__ == "__main__":
