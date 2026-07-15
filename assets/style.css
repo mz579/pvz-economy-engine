@@ -773,11 +773,33 @@ body,
   font-size: 0.58rem;
 }
 
-.reason-card p {
-  margin: 0.35rem 0 0;
+.reason-points {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0.45rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reason-points li {
+  display: grid;
+  grid-template-columns: 5.1rem minmax(0, 1fr);
+  gap: 0.45rem;
+  min-width: 0;
+  padding-top: 0.3rem;
+  border-top: 1px solid rgba(69, 101, 84, 0.55);
+}
+
+.reason-points b {
+  color: var(--growth);
+  font-size: 0.64rem;
+}
+
+.reason-points span {
+  overflow-wrap: anywhere;
   color: var(--text-secondary);
-  font-size: 0.72rem;
-  line-height: 1.55;
+  font-size: 0.68rem;
+  line-height: 1.5;
 }
 
 .data-scope {
@@ -823,6 +845,20 @@ body,
   font-size: 0.54rem;
   font-style: normal;
   line-height: 1.35;
+}
+
+.market-method-note {
+  margin: 0.55rem 0 0;
+  padding: 0.55rem 0.65rem;
+  border-left: 3px solid var(--intel);
+  background: rgba(101, 183, 232, 0.07);
+  color: var(--text-secondary);
+  font-size: 0.65rem;
+  line-height: 1.55;
+}
+
+.market-method-note strong {
+  color: var(--intel);
 }
 
 .intel-strip {
@@ -874,6 +910,78 @@ body,
   background: #2b2919;
   color: #eee7bf;
   font-size: 0.75rem;
+}
+
+.formula-note {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.65rem 0;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+}
+
+.formula-note strong {
+  color: var(--text);
+  font-size: 0.76rem;
+}
+
+.formula-note span {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  line-height: 1.45;
+}
+
+.formula-note small {
+  padding-top: 0.35rem;
+  border-top: 1px dashed var(--border);
+  color: var(--text-muted);
+  font-size: 0.61rem;
+  line-height: 1.45;
+}
+
+.chart-state {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: center;
+  gap: 0.75rem;
+  min-height: 310px;
+  padding: 1rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: 5px;
+  background: var(--panel);
+}
+
+.chart-state > span {
+  color: var(--intel);
+  font-family: var(--font-mono);
+  font-size: 1.7rem;
+}
+
+.chart-state b,
+.chart-state strong {
+  display: block;
+  color: var(--text);
+}
+
+.chart-state b {
+  font-size: 0.82rem;
+}
+
+.chart-state strong {
+  margin-top: 0.35rem;
+  color: var(--sun);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+}
+
+.chart-state p {
+  margin: 0.2rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  line-height: 1.5;
 }
 
 .technical-facts {
@@ -1273,6 +1381,15 @@ summary:focus-visible {
 
   .intel-strip {
     grid-template-columns: 1fr;
+  }
+
+  .reason-points li {
+    grid-template-columns: 1fr;
+    gap: 0.08rem;
+  }
+
+  .chart-state {
+    min-height: 220px;
   }
 
   .table-heading {

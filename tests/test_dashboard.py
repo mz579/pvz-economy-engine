@@ -8,6 +8,8 @@ import re
 import sys
 import unittest
 
+import pandas as pd
+
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -98,6 +100,43 @@ class DashboardModelTests(unittest.TestCase):
             ),
         )
 
+    def test_default_zero_sun_mushroom_fills_remaining_cells_truthfully(self) -> None:
+        model = build_dashboard_model("均衡巡逻", 150, 20)
+        combination = {
+            item["name"]: item for item in model["result"]["combination"]
+        }
+        mushroom = combination["小喷菇"]
+        other_plants = sum(
+            int(item["quantity"])
+            for name, item in combination.items()
+            if name != "小喷菇"
+        )
+
+        self.assertEqual(mushroom["unit_sun_cost"], 0)
+        self.assertGreater(mushroom["unit_score"], 0)
+        self.assertEqual(int(mushroom["quantity"]), 20 - other_plants)
+        self.assertEqual(model["result"]["total_plants"], 20)
+
+    def test_chart_state_handles_empty_single_constant_and_regular_data(self) -> None:
+        from app import chart_data_state
+
+        self.assertEqual(
+            chart_data_state(pd.DataFrame(columns=["price"]), ["price"]),
+            "empty",
+        )
+        self.assertEqual(
+            chart_data_state(pd.DataFrame({"price": [3.2]}), ["price"]),
+            "single",
+        )
+        self.assertEqual(
+            chart_data_state(pd.DataFrame({"price": [3.2, 3.2]}), ["price"]),
+            "single",
+        )
+        self.assertEqual(
+            chart_data_state(pd.DataFrame({"price": [3.2, 3.4]}), ["price"]),
+            "chart",
+        )
+
 
 class StreamlitAppTests(unittest.TestCase):
     @staticmethod
@@ -121,11 +160,16 @@ class StreamlitAppTests(unittest.TestCase):
             "价格与评分",
             "作战属性",
             "推荐原因",
-            "市场数据和趋势",
-            "市场情报",
+            "市场证据",
+            "当前价格",
+            "为什么入选",
             "阵容展示布局",
             "非优化器计算出的最优坐标",
             "模型说明与技术细节",
+            "评分与权重",
+            "完整植物排名",
+            "优化与映射",
+            "调试信息",
             "相对比较指数",
             "上传地区菜价 CSV",
             "下载 CSV 模板",
@@ -140,12 +184,15 @@ class StreamlitAppTests(unittest.TestCase):
             "render_hero(model)",
             "render_recommendation_summary(model, available_sun, available_cells)",
             "render_reasons(model)",
-            "render_candidate_comparison(model)",
             "render_market_section(model)",
+            "render_candidate_comparison(model)",
             "render_technical_details(model)",
         )
         positions = [source.index(call, source.index("def main()")) for call in ordered_calls]
         self.assertEqual(positions, sorted(positions))
+        expander_position = source.index('with st.expander("模型说明与技术细节")')
+        for technical_label in ("评分与权重", "完整植物排名", "优化与映射", "调试信息"):
+            self.assertGreater(source.index(technical_label), expander_position)
 
     def test_app_waits_for_explicit_analysis(self) -> None:
         app_test = self.load_app_test()
@@ -180,6 +227,11 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertIn("阳光消耗", html)
         self.assertIn("草坪占用", html)
         self.assertIn("相对比较指数", html)
+        self.assertIn("reason-points", html)
+        self.assertIn("当前价格", html)
+        self.assertIn("为什么入选", html)
+        self.assertIn("market-method-note", html)
+        self.assertIn("元/斤", html)
         for item in app.session_state["analysis_model"]["result"]["combination"]:
             with self.subTest(plant=item["name"]):
                 self.assertIn(item["name"], html)
@@ -296,8 +348,44 @@ class StreamlitAppTests(unittest.TestCase):
 
         style = (ROOT / "assets" / "style.css").read_text(encoding="utf-8")
         self.assertNotRegex(style, re.compile(r"letter-spacing\s*:\s*-"))
+        self.assertIn("@media (max-width: 620px)", style)
+        self.assertIn("overflow-x: hidden", style)
+        self.assertIn(".chart-state", style)
         self.assertGreaterEqual(contrast("#F1F4DF", "#0B1811"), 4.5)
         self.assertGreaterEqual(contrast("#A9B9A8", "#0B1811"), 4.5)
+
+    def test_readme_documents_current_ui_and_model_boundaries(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        for statement in (
+            "🚀 开始分析",
+            "元/斤",
+            "乘以 2",
+            "不是百分制、收益率或成功概率",
+            "展示布局",
+            "用户 CSV",
+            "离线 fallback",
+        ):
+            with self.subTest(statement=statement):
+                self.assertIn(statement, readme)
+
+    def test_documented_screenshots_match_validated_viewports(self) -> None:
+        def png_dimensions(path: Path) -> tuple[int, int]:
+            content = path.read_bytes()
+            self.assertEqual(content[:8], b"\x89PNG\r\n\x1a\n")
+            return (
+                int.from_bytes(content[16:20], "big"),
+                int.from_bytes(content[20:24], "big"),
+            )
+
+        screenshot_dir = ROOT / "docs" / "screenshots"
+        self.assertEqual(
+            png_dimensions(screenshot_dir / "dashboard.png"),
+            (1280, 720),
+        )
+        self.assertEqual(
+            png_dimensions(screenshot_dir / "dashboard-mobile.png"),
+            (390, 844),
+        )
 
     def test_infeasible_user_csv_has_independent_error_state(self) -> None:
         app_test = self.load_app_test()

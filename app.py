@@ -81,6 +81,40 @@ def format_price(value: object, unit: object) -> str:
     return f"{number} {unit}"
 
 
+def chart_data_state(data: object, columns: list[str]) -> str:
+    """Classify chart input so empty or single-value data never renders badly."""
+
+    if data is None or bool(getattr(data, "empty", True)):
+        return "empty"
+    available_columns = [
+        column for column in columns if column in getattr(data, "columns", [])
+    ]
+    if not available_columns:
+        return "empty"
+    usable = data[available_columns].dropna(how="all")
+    if usable.empty:
+        return "empty"
+    values = usable.stack().dropna()
+    if len(usable) == 1 or values.empty or values.nunique() <= 1:
+        return "single"
+    return "chart"
+
+
+def render_chart_state(title: str, copy: str, value: str = "") -> None:
+    """Render an accessible chart fallback without manufacturing data points."""
+
+    value_html = f"<strong>{escape(value)}</strong>" if value else ""
+    st.markdown(
+        f"""
+        <div class="chart-state" role="status">
+          <span aria-hidden="true">⌁</span>
+          <div><b>{escape(title)}</b><p>{escape(copy)}</p>{value_html}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def build_submitted_dashboard_model(
     zombie_mode: str,
     available_sun: int,
@@ -369,56 +403,10 @@ def render_coverage_notice(model: dict) -> None:
 def render_candidate_comparison(model: dict) -> None:
     """Compare every mapped and unmapped plant without inventing market data."""
 
-    coverage = model["coverage"]
-    unmatched_count = coverage["total_plants"] - coverage["matched_plants"]
     section_header(
-        "MARKET INTELLIGENCE",
-        "市场情报",
-        "先核对本轮数据口径，再比较全部候选植物。未映射项目保留作战属性，但不伪造价格或评分。",
-    )
-    st.markdown(
-        f"""
-        <div class="data-scope" aria-label="菜价数据口径">
-          <span><small>价格单位</small><strong>{escape(model['price_unit'])}</strong>
-          <em>清洗后标准单位</em></span>
-          <span><small>数据日期</small><strong>{model['latest_date'].strftime('%Y-%m-%d')}</strong></span>
-          <span><small>数据来源</small><strong>{escape(model['data_source'])}</strong></span>
-          <span><small>使用模式</small><strong>{escape(model['data_mode'])}</strong></span>
-          <span><small>映射覆盖</small><strong>{coverage['matched_plants']} 已映射 / {unmatched_count} 未映射</strong></span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    ranking = model["ranking"]
-    top_row = ranking.iloc[0]
-    selected_ranks = sorted(
-        int(row["rank"])
-        for _, row in ranking.loc[
-            ranking["name"].isin(model["result"]["strategy"])
-        ].iterrows()
-    )
-    selected_rank_text = (
-        "、".join(f"#{rank_value}" for rank_value in selected_ranks)
-        if selected_ranks
-        else "暂无"
-    )
-    st.markdown(
-        f"""
-        <div class="intel-strip" aria-label="市场情报摘要">
-          <span><small>当前评分首位</small><strong>{escape(str(top_row['name']))}</strong>
-          <em>{top_row['apocalypse_index']:.4f}</em></span>
-          <span><small>本轮入选排名</small><strong>{escape(selected_rank_text)}</strong>
-          <em>按单株相对评分</em></span>
-          <span><small>样本菜品</small><strong>{model['prices']['name'].nunique()} 种</strong>
-          <em>{len(model['prices'])} 条价格记录</em></span>
-        </div>
-        <div class="table-heading">
-          <div><span>CANDIDATE BOARD</span><strong>全部候选植物对比</strong></div>
-          <p>默认按单株相对评分从高到低排列</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
+        "CANDIDATE BOARD",
+        "全部候选植物对比",
+        "默认按单株相对评分从高到低排列；未映射项目保留作战属性，但不伪造价格或评分。",
     )
 
     price_rows = []
@@ -506,15 +494,64 @@ def render_constraint_bar(result: dict) -> None:
 
 
 def render_reasons(model: dict) -> None:
+    """Explain each selected plant with four short, model-backed facts."""
+
+    ranking = model["ranking"].set_index("name")
+    unit = model["price_unit"]
     reason_cards = []
     for reason in model["reasons"]:
+        row = ranking.loc[reason["name"]]
+        current_price = float(row["current_price"])
+        average_price = float(row["historical_mean"])
+        price_difference = current_price - average_price
+        if abs(price_difference) < 0.005:
+            price_copy = (
+                f"{current_price:.2f} {unit}，与样本均价 "
+                f"{average_price:.2f} {unit} 基本持平"
+            )
+        else:
+            relation = "低于" if price_difference < 0 else "高于"
+            price_copy = (
+                f"{current_price:.2f} {unit}，{relation}样本均价 "
+                f"{average_price:.2f} {unit}（差值 {price_difference:+.2f} {unit}）"
+            )
+
+        attributes = sorted(
+            (
+                ("攻击", float(row["attack_score"])),
+                ("防御", float(row["defense_score"])),
+                ("生产", float(row["production_score"])),
+                ("控制", float(row["control_score"])),
+                ("特殊", float(row["special_score"])),
+            ),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:2]
+        attribute_copy = "、".join(
+            f"{label} {value:.1f}" for label, value in attributes
+        )
+        sun_cost = int(row["sun_cost"])
+        cost_copy = (
+            "0 阳光/株，但仍占用 1 个草坪格"
+            if sun_cost == 0
+            else f"{sun_cost} 阳光/株"
+        )
+        selected_copy = (
+            f"单株相对评分 {row['apocalypse_index']:.4f}，当前排名 "
+            f"#{int(row['rank'])}；优化器在阳光、格子和阵容约束下将其选入"
+        )
         reason_cards.append(
             f'<article class="reason-card">'
             f'<div class="reason-icon">{reason["emoji"]}</div>'
             f'<div><div class="reason-title">'
             f'<strong>{escape(reason["name"])} × {reason["quantity"]}</strong>'
             f'<span>{escape(str(reason["role"]))}</span>'
-            f'</div><p>{escape(reason["text"])}</p></div>'
+            f'</div><ul class="reason-points">'
+            f'<li><b>当前价格</b><span>{escape(price_copy)}</span></li>'
+            f'<li><b>作战属性</b><span>{escape(attribute_copy)}；{escape(str(reason["ability"]))}</span></li>'
+            f'<li><b>阳光成本</b><span>{escape(cost_copy)}，本轮种植 {reason["quantity"]} 株</span></li>'
+            f'<li><b>为什么入选</b><span>{escape(selected_copy)}</span></li>'
+            f'</ul></div>'
             f'</article>'
         )
     st.markdown(f'<div class="reason-grid">{"".join(reason_cards)}</div>', unsafe_allow_html=True)
@@ -536,93 +573,259 @@ def section_header(kicker: str, title: str, copy: str) -> None:
 def render_market_section(model: dict) -> None:
     """Render price evidence after the recommendation and its reasons."""
 
-    section_header(
-        "MARKET INTEL",
-        "市场数据和趋势",
-        "查看菜价变化与单株相对比较指数；这些数据用于解释推荐，而不是收益率预测。",
+    coverage = model["coverage"]
+    unmatched_count = coverage["total_plants"] - coverage["matched_plants"]
+    ranking = model["ranking"]
+    top_row = ranking.iloc[0]
+    selected_ranks = sorted(
+        int(row["rank"])
+        for _, row in ranking.loc[
+            ranking["name"].isin(model["result"]["strategy"])
+        ].iterrows()
     )
+    selected_rank_text = (
+        "、".join(f"#{rank_value}" for rank_value in selected_ranks)
+        if selected_ranks
+        else "暂无"
+    )
+    section_header(
+        "MARKET EVIDENCE",
+        "市场证据",
+        "核对数据口径、价格趋势和当前价与样本均价；这些证据用于解释推荐，不是收益率预测。",
+    )
+    st.markdown(
+        f"""
+        <div class="data-scope" aria-label="菜价数据口径">
+          <span><small>页面价格单位</small><strong>{escape(model['price_unit'])}</strong>
+          <em>清洗后的标准单位</em></span>
+          <span><small>数据日期</small><strong>{model['latest_date'].strftime('%Y-%m-%d')}</strong></span>
+          <span><small>数据来源</small><strong>{escape(model['data_source'])}</strong></span>
+          <span><small>使用模式</small><strong>{escape(model['data_mode'])}</strong></span>
+          <span><small>映射覆盖</small><strong>{coverage['matched_plants']} 已映射 / {unmatched_count} 未映射</strong></span>
+        </div>
+        <p class="market-method-note"><strong>单位换算：</strong>
+        原始“元/斤”价格在清洗时乘以 2，原始“元/kg”保持不变；图表和结果卡统一显示当前模型的
+        {escape(model['price_unit'])}。在线数据、用户 CSV 与离线 fallback 会在“使用模式”和“数据来源”中明确区分。</p>
+        <div class="intel-strip" aria-label="市场情报摘要">
+          <span><small>当前评分首位</small><strong>{escape(str(top_row['name']))}</strong>
+          <em>{top_row['apocalypse_index']:.4f}</em></span>
+          <span><small>本轮入选排名</small><strong>{escape(selected_rank_text)}</strong>
+          <em>按单株相对评分</em></span>
+          <span><small>样本菜品</small><strong>{model['prices']['name'].nunique()} 种</strong>
+          <em>{len(model['prices'])} 条价格记录</em></span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     chart_left, chart_right = st.columns([1.15, 1])
-    vegetables = model["ranking"]["vegetable_name"].drop_duplicates().tolist()
+    vegetables = ranking["vegetable_name"].dropna().drop_duplicates().tolist()
     with chart_left:
-        selected_vegetable = st.selectbox("查看蔬菜价格", vegetables)
-        trend = get_price_trend(model["prices"], selected_vegetable)
-        st.line_chart(
-            trend.set_index("date")[["price"]],
-            height=310,
-            **stretch_width(st.line_chart),
-        )
-        st.caption(
-            f"{selected_vegetable} · 单位：{model['price_unit']} · 来源：{model['data_source']}"
-        )
+        if not vegetables:
+            render_chart_state(
+                "暂无价格趋势",
+                "当前数据没有可映射蔬菜，因此不绘制空图表。",
+            )
+        else:
+            selected_vegetable = st.selectbox("查看蔬菜价格", vegetables)
+            trend = get_price_trend(model["prices"], selected_vegetable)
+            trend_state = chart_data_state(trend, ["price"])
+            if trend_state == "chart":
+                st.line_chart(
+                    trend.set_index("date")[["price"]],
+                    height=310,
+                    **stretch_width(st.line_chart),
+                )
+            elif trend_state == "single":
+                latest_value = format_price(
+                    trend.iloc[-1]["price"] if not trend.empty else None,
+                    model["price_unit"],
+                )
+                render_chart_state(
+                    "价格样本不足以绘制趋势",
+                    "当前只有一条有效记录，或所选时段价格完全一致；保留真实观测值，不扩造坐标范围。",
+                    latest_value,
+                )
+            else:
+                render_chart_state(
+                    "暂无价格趋势",
+                    "所选蔬菜没有有效价格记录，因此不绘制空图表。",
+                )
+            st.caption(
+                f"{selected_vegetable} · 单位：{model['price_unit']} · 来源：{model['data_source']}"
+            )
     with chart_right:
-        top_ranking = (
-            model["ranking"]
+        price_comparison = (
+            ranking[["name", "current_price", "historical_mean"]]
+            .dropna(subset=["current_price", "historical_mean"])
             .head(10)
-            .set_index("name")[["apocalypse_index"]]
-            .rename(columns={"apocalypse_index": "单株相对比较指数"})
         )
-        st.bar_chart(top_ranking, height=310, **stretch_width(st.bar_chart))
-        st.caption("Top 10 单株相对比较指数；只用于同一模型内横向比较。")
+        comparison_state = chart_data_state(
+            price_comparison, ["current_price", "historical_mean"]
+        )
+        if comparison_state == "chart":
+            comparison_chart = (
+                price_comparison.set_index("name")
+                [["current_price", "historical_mean"]]
+                .rename(
+                    columns={
+                        "current_price": "当前单价",
+                        "historical_mean": "样本均价",
+                    }
+                )
+            )
+            st.bar_chart(
+                comparison_chart,
+                height=310,
+                **stretch_width(st.bar_chart),
+            )
+        elif comparison_state == "single":
+            if price_comparison.empty:
+                comparison_value = ""
+            else:
+                row = price_comparison.iloc[0]
+                comparison_value = (
+                    f"{row['name']}：当前 {format_price(row['current_price'], model['price_unit'])} / "
+                    f"均价 {format_price(row['historical_mean'], model['price_unit'])}"
+                )
+            render_chart_state(
+                "价格对比样本不足",
+                "当前只有一个候选或所有价格相同，改为展示真实数值，避免无意义的图表范围。",
+                comparison_value,
+            )
+        else:
+            render_chart_state(
+                "暂无价格对比",
+                "当前没有同时具备当前价和样本均价的候选植物。",
+            )
+        st.caption(
+            f"最多展示评分前 10 个已映射候选的当前单价与样本均价 · 单位：{model['price_unit']}"
+        )
 
 
 def render_technical_details(model: dict) -> None:
     """Keep solver, formula, constraints and raw model state below the results."""
 
     result = model["result"]
+    coverage = model["coverage"]
+    solver_label = "整数规划" if result["method"] == "pulp" else "贪心兜底"
+    weight_labels = {
+        "attack": "攻击",
+        "defense": "防御",
+        "production": "生产",
+        "control": "控制",
+        "special": "特殊能力",
+    }
+    weight_rows = [
+        {
+            "维度": weight_labels.get(name, name),
+            "当前模式权重": f"{float(value):.1%}",
+        }
+        for name, value in model["weights"].items()
+    ]
+    ranking_table = model["ranking"][
+        [
+            "rank",
+            "name",
+            "vegetable_name",
+            "role",
+            "sun_cost",
+            "latest_price",
+            "battle_value",
+            "price_undervaluation",
+            "stability_coefficient",
+            "apocalypse_index",
+            "recommendation_reason",
+        ]
+    ].rename(
+        columns={
+            "rank": "排名",
+            "name": "植物",
+            "vegetable_name": "映射蔬菜",
+            "role": "定位",
+            "sun_cost": "阳光成本",
+            "latest_price": f"最新菜价({model['price_unit']})",
+            "battle_value": "战斗价值",
+            "price_undervaluation": "价格低估系数",
+            "stability_coefficient": "稳定性系数",
+            "apocalypse_index": "单株相对比较指数",
+            "recommendation_reason": "评分理由",
+        }
+    )
+
     with st.expander("模型说明与技术细节"):
-        solver_label = "整数规划" if result["method"] == "pulp" else "贪心兜底"
-        st.markdown(
-            f'<div class="model-notice">🧪 <strong>{escape(model["score_label"])}</strong> · '
-            f'{escape(model["score_notice"])}。总评分在页面中标为“相对比较指数”，'
-            f'不是百分制、收益率或成功概率。</div>',
-            unsafe_allow_html=True,
+        score_tab, ranking_tab, optimizer_tab, debug_tab = st.tabs(
+            ["📐 评分与权重", "🌿 完整植物排名", "🧩 优化与映射", "🧰 调试信息"]
         )
-        st.markdown(
-            f'<div class="technical-facts">'
-            f'<span><strong>求解方式</strong>{escape(solver_label)}</span>'
-            f'<span><strong>求解状态</strong>{escape(str(result["status"]))}</span>'
-            f'<span><strong>菜价来源</strong>{escape(model["data_source"])}</span>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-        render_constraint_bar(result)
-        table = model["ranking"][
-            [
-                "rank",
-                "name",
-                "vegetable_name",
-                "role",
-                "sun_cost",
-                "latest_price",
-                "battle_value",
-                "price_undervaluation",
-                "stability_coefficient",
-                "apocalypse_index",
-                "recommendation_reason",
-            ]
-        ].rename(
-            columns={
-                "rank": "排名",
-                "name": "植物",
-                "vegetable_name": "映射蔬菜",
-                "role": "定位",
-                "sun_cost": "阳光成本",
-                "latest_price": f"最新菜价({model['price_unit']})",
-                "battle_value": "战斗价值",
-                "price_undervaluation": "价格低估系数",
-                "stability_coefficient": "稳定性系数",
-                "apocalypse_index": "单株相对比较指数",
-                "recommendation_reason": "评分理由",
-            }
-        )
-        st.dataframe(table, hide_index=True, **stretch_width(st.dataframe))
-        st.json(
-            {
-                "求解状态": result["status"],
-                "约束检查": result["constraint_checks"],
-                "评分权重": model["weights"],
-            }
-        )
+        with score_tab:
+            st.markdown(
+                f'<div class="model-notice">🧪 <strong>{escape(model["score_label"])}</strong> · '
+                f'{escape(model["score_notice"])}。组合总分在页面中标为“相对比较指数”，'
+                f'只用于当前候选之间比较，不是百分制、收益率或成功概率。</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                """
+                <div class="formula-note">
+                  <strong>计算口径</strong>
+                  <span>战斗价值 = 五项作战属性按当前模式权重加权</span>
+                  <span>价格低估系数 = 历史均价 ÷ 当前价格</span>
+                  <span>稳定性系数 = 1 ÷（1 + 价格波动率）</span>
+                  <span>单株相对指数 = 战斗价值 × 价格低估系数 × 稳定性系数 ÷ 有效阳光成本</span>
+                  <small>零阳光植物只在评分分母中使用 25 点保护值；优化器仍读取真实阳光成本。</small>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.dataframe(
+                weight_rows,
+                hide_index=True,
+                height=220,
+                **stretch_width(st.dataframe),
+            )
+        with ranking_tab:
+            st.caption("完整排名保留评分分解与原始推荐理由，默认不占据主页面。")
+            st.dataframe(
+                ranking_table,
+                hide_index=True,
+                height=520,
+                **stretch_width(st.dataframe),
+            )
+        with optimizer_tab:
+            st.markdown(
+                f'<div class="technical-facts">'
+                f'<span><strong>求解方式</strong>{escape(solver_label)}</span>'
+                f'<span><strong>求解器状态</strong>{escape(str(result["status"]))}</span>'
+                f'<span><strong>菜价来源</strong>{escape(model["data_source"])}</span>'
+                f'<span><strong>数据模式</strong>{escape(model["data_mode"])}</span>'
+                f'<span><strong>数据日期</strong>{model["latest_date"].strftime("%Y-%m-%d")}</span>'
+                f'<span><strong>映射情况</strong>{coverage["matched_plants"]} / {coverage["total_plants"]} 种植物</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            render_constraint_bar(result)
+            st.caption(
+                "约束包括阳光预算、格子上限、至少 1 个攻击植物，以及至少 1 个防御或控制植物。"
+            )
+            if coverage["excluded_plants"]:
+                st.info(
+                    "未映射菜价、未参与本轮评分的植物："
+                    + "、".join(coverage["excluded_plants"])
+                )
+            else:
+                st.success("本轮 15 种植物均已映射菜价。")
+        with debug_tab:
+            st.caption("用于复核本次提交状态；不包含邮箱、路径或其他个人信息。")
+            st.json(
+                {
+                    "僵尸模式": model["zombie_mode"],
+                    "求解状态": result["status"],
+                    "求解方式": result["method"],
+                    "约束检查": result["constraint_checks"],
+                    "评分权重": model["weights"],
+                    "映射覆盖": coverage,
+                }
+            )
 
 
 def main() -> None:
@@ -734,10 +937,8 @@ def main() -> None:
         )
         render_reasons(model)
 
+    render_market_section(model)
     render_candidate_comparison(model)
-
-    if result["all_constraints_met"]:
-        render_market_section(model)
 
     render_technical_details(model)
 
