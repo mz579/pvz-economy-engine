@@ -6,7 +6,9 @@ from collections import Counter
 from pathlib import Path
 import re
 import sys
+import tempfile
 import unittest
+from zipfile import ZipFile
 
 import pandas as pd
 
@@ -301,6 +303,31 @@ class StreamlitAppTests(unittest.TestCase):
         app.run(timeout=30)
         self.assertEqual(len(app.exception), 0)
         self.assertEqual(app.session_state["analysis_params"]["available_sun"], 200)
+
+    def test_incomplete_portable_package_hides_python_traceback(self) -> None:
+        try:
+            from streamlit.testing.v1 import AppTest
+        except ImportError:  # pragma: no cover - old supported Streamlit releases
+            self.skipTest("当前 Streamlit 版本不包含 AppTest")
+
+        from scripts.build_release import build_release
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = build_release("v2.1.2-damaged", root / "dist")
+            with ZipFile(archive) as package:
+                package.extractall(root / "extract")
+            package_root = root / "extract" / "pvz-economy-engine-v2.1.2-damaged"
+            (package_root / "data" / "plants.csv").unlink()
+
+            app = AppTest.from_file(str(package_root / "app.py")).run(timeout=30)
+
+        self.assertEqual(len(app.exception), 0)
+        self.assertEqual(len(app.error), 1)
+        self.assertIn("安装包不完整，请重新下载", app.error[0].value)
+        rendered = self.rendered_html(app)
+        self.assertNotIn("Traceback", rendered)
+        self.assertNotIn("FileNotFoundError", rendered)
 
     def test_invalid_csv_error_only_appears_after_submit(self) -> None:
         app_test = self.load_app_test()
