@@ -19,7 +19,7 @@ if str(ROOT) not in sys.path:
 from src.crawler import CollectionResult, collect_price_data
 from src.features import FEATURE_COLUMNS, add_price_features
 from src.pipeline import run_data_pipeline
-from src.preprocess import STANDARD_COLUMNS, clean_price_data
+from src.preprocess import NORMALIZED_PRICE_UNIT, STANDARD_COLUMNS, clean_price_data
 
 
 class DataCleaningTests(unittest.TestCase):
@@ -37,6 +37,7 @@ class DataCleaningTests(unittest.TestCase):
         self.assertEqual(cleaned["name"].tolist(), ["土豆", "黄瓜"])
         self.assertEqual(cleaned["price"].tolist(), [4.0, 3.5])
         self.assertTrue(cleaned["source"].eq("fixture").all())
+        self.assertEqual(cleaned.attrs["price_unit"], NORMALIZED_PRICE_UNIT)
 
     def test_features_use_coefficient_of_variation(self) -> None:
         cleaned = clean_price_data(
@@ -53,6 +54,7 @@ class DataCleaningTests(unittest.TestCase):
         self.assertTrue(set(FEATURE_COLUMNS).issubset(featured.columns))
         self.assertAlmostEqual(featured.iloc[-1]["historical_mean"], 3.0)
         self.assertAlmostEqual(featured.iloc[-1]["volatility"], 1.0 / 3.0)
+        self.assertEqual(featured.attrs["price_unit"], NORMALIZED_PRICE_UNIT)
 
 
 class DataPipelineTests(unittest.TestCase):
@@ -104,6 +106,7 @@ class DataPipelineTests(unittest.TestCase):
         )
         self.assertEqual(written["source"].unique().tolist(), ["local_csv_fallback"])
         self.assertIn("volatility", written.columns)
+        self.assertEqual(artifacts.data.attrs["price_unit"], NORMALIZED_PRICE_UNIT)
 
     def test_partial_online_sample_falls_back_for_mapping_coverage(self) -> None:
         online = CollectionResult(

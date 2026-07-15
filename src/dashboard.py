@@ -10,6 +10,7 @@ import pandas as pd
 from src.optimizer import optimize_planting
 from src.pipeline import DEFAULT_PROCESSED_PATH, load_or_build_processed_prices
 from src.plant_mapping import load_plant_mapping
+from src.preprocess import NORMALIZED_PRICE_UNIT
 from src.scoring import apply_weight_multipliers, calculate_apocalypse_scores
 
 
@@ -112,6 +113,15 @@ def build_dashboard_model(
         "xinfadi_official": "北京新发地公开价格",
     }
     data_source = "、".join(_source_label(item, source_labels) for item in sources)
+    price_unit = str(prices.attrs.get("price_unit", NORMALIZED_PRICE_UNIT))
+    candidate_comparison = build_candidate_comparison(
+        all_plants,
+        ranking,
+        result,
+        price_unit=price_unit,
+    )
+    max_plant_share = float(result["max_plant_share"])
+    per_plant_limit = int(result["per_plant_limit"])
 
     return {
         "zombie_mode": zombie_mode,
@@ -125,8 +135,22 @@ def build_dashboard_model(
         "reasons": reasons,
         "latest_date": latest_date,
         "data_source": data_source,
+        "data_mode": _data_mode_label(sources),
+        "price_unit": price_unit,
+        "candidate_comparison": candidate_comparison,
         "score_label": "末日性价比指数",
         "score_notice": "战斗价值 × 价格低估系数 × 稳定性系数 ÷ 有效阳光成本",
+        "concentration_policy": {
+            "max_plant_share": max_plant_share,
+            "per_plant_limit": per_plant_limit,
+            "description": (
+                f"每种植物最多占草坪容量的 {max_plant_share:.0%}，"
+                f"本轮最多 {per_plant_limit} 株。"
+            ),
+            "is_v2_assumption": True,
+            "unused_cells": int(result["unused_cells"]),
+            "unused_cells_reason": result["unused_cells_reason"],
+        },
         "coverage": {
             "matched_plants": int(len(plants)),
             "total_plants": int(len(all_plants)),
@@ -150,6 +174,9 @@ def _validate_featured_prices(prices: pd.DataFrame) -> pd.DataFrame:
     if missing:
         raise ValueError(f"地区菜价缺少处理后字段: {', '.join(sorted(missing))}")
     result = prices.copy()
+    result.attrs["price_unit"] = prices.attrs.get(
+        "price_unit", NORMALIZED_PRICE_UNIT
+    )
     result["date"] = pd.to_datetime(result["date"], errors="coerce")
     if result["date"].isna().all():
         raise ValueError("地区菜价没有有效日期")
@@ -160,6 +187,59 @@ def _source_label(source: str, labels: dict[str, str]) -> str:
     if source.startswith("user_upload:"):
         return f"用户上传 · {source.split(':', 1)[1]}"
     return labels.get(source, source)
+
+
+def _data_mode_label(sources: list[str]) -> str:
+    if any(source.startswith("user_upload:") for source in sources):
+        return "用户 CSV"
+    if any(source == "local_csv_fallback" for source in sources):
+        return "离线 fallback"
+    return "在线数据"
+
+
+def build_candidate_comparison(
+    all_plants: pd.DataFrame,
+    ranking: pd.DataFrame,
+    result: dict[str, Any],
+    *,
+    price_unit: str,
+) -> pd.DataFrame:
+    """Return every plant with truthful mapped-price and selection metadata."""
+
+    score_columns = [
+        "name",
+        "price_date",
+        "current_price",
+        "historical_mean",
+        "apocalypse_index",
+        "rank",
+    ]
+    comparison = all_plants.merge(
+        ranking[score_columns],
+        on="name",
+        how="left",
+        validate="one_to_one",
+    )
+    quantities = {
+        item["name"]: int(item["quantity"])
+        for item in result["combination"]
+    }
+    comparison["selected_quantity"] = (
+        comparison["name"].map(quantities).fillna(0).astype(int)
+    )
+    comparison["selected"] = comparison["selected_quantity"].gt(0)
+    comparison["has_price"] = comparison["current_price"].notna()
+    comparison["price_unit"] = comparison["has_price"].map(
+        {True: price_unit, False: None}
+    )
+    comparison["price_difference"] = (
+        comparison["current_price"] - comparison["historical_mean"]
+    )
+    return comparison.sort_values(
+        ["apocalypse_index", "name"],
+        ascending=[False, True],
+        na_position="last",
+    ).reset_index(drop=True)
 
 
 def get_price_trend(prices: pd.DataFrame, vegetable_name: str) -> pd.DataFrame:

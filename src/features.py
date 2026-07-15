@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from src.preprocess import STANDARD_COLUMNS
+from src.preprocess import NORMALIZED_PRICE_UNIT, STANDARD_COLUMNS
 
 
 FEATURE_COLUMNS = (
@@ -32,7 +32,13 @@ def add_price_features(data: pd.DataFrame, *, history_window: int = 30) -> pd.Da
     if missing:
         raise ValueError(f"特征输入缺少字段: {', '.join(sorted(missing))}")
     if data.empty:
-        return data.assign(**{column: pd.Series(dtype=float) for column in FEATURE_COLUMNS})
+        result = data.assign(
+            **{column: pd.Series(dtype=float) for column in FEATURE_COLUMNS}
+        )
+        result.attrs["price_unit"] = data.attrs.get(
+            "price_unit", NORMALIZED_PRICE_UNIT
+        )
+        return result
 
     result = data.copy()
     result["date"] = pd.to_datetime(result["date"], errors="coerce")
@@ -58,4 +64,5 @@ def add_price_features(data: pd.DataFrame, *, history_window: int = 30) -> pd.Da
     result[numeric_columns] = result[numeric_columns].replace(
         [float("inf"), float("-inf")], 0
     )
+    result.attrs["price_unit"] = data.attrs.get("price_unit", NORMALIZED_PRICE_UNIT)
     return result
