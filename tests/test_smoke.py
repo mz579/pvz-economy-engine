@@ -1,4 +1,4 @@
-"""Project-boundary smoke tests for the completed V2.0 workflow."""
+"""Project-boundary smoke tests for the completed V2.1.0 workflow."""
 
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ class ProjectStructureTests(unittest.TestCase):
     def test_package_version_is_final_v2(self) -> None:
         from src import __version__
 
-        self.assertEqual(__version__, "2.0.0")
+        self.assertEqual(__version__, "2.1.0")
 
 
 class WorkflowSmokeTests(unittest.TestCase):

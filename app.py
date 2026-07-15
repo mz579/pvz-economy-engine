@@ -1,4 +1,4 @@
-"""PvZ-inspired Streamlit dashboard for the V2.0 recommendation system."""
+"""PvZ-inspired Streamlit dashboard for the V2.1.0 recommendation system."""
 
 from __future__ import annotations
 
@@ -217,7 +217,7 @@ def render_hero(model: dict) -> None:
         f"""
         <section class="terminal-header" aria-label="末日菜园作战终端">
           <div class="terminal-brand">
-            <div class="terminal-kicker">GARDEN DEFENSE CONSOLE · V2.0</div>
+            <div class="terminal-kicker">GARDEN DEFENSE CONSOLE · V2.1.0</div>
             <h1>末日菜园作战室</h1>
           </div>
           <div class="terminal-readout" aria-label="当前分析场景">
@@ -963,7 +963,7 @@ def main() -> None:
     st.markdown(
         """
         <footer class="page-footer">
-          <span>🌱 PvZ Economy Engine V2.0</span>
+          <span>🌱 PvZ Economy Engine V2.1.0</span>
           <span>数据分析与运筹优化练习 · 非官方游戏项目</span>
         </footer>
         """,
