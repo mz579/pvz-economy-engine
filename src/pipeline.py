@@ -18,13 +18,13 @@ from src.crawler import (
 )
 from src.features import add_price_features
 from src.preprocess import NORMALIZED_PRICE_UNIT, clean_price_data
+from src.runtime import runtime_path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_RAW_PATH = PROJECT_ROOT / "data" / "raw" / "latest_prices.csv"
-DEFAULT_METADATA_PATH = PROJECT_ROOT / "data" / "raw" / "latest_prices.metadata.json"
-DEFAULT_PROCESSED_PATH = PROJECT_ROOT / "data" / "processed" / "vegetable_prices.csv"
-DEFAULT_PLANT_PATH = PROJECT_ROOT / "data" / "plants.csv"
+DEFAULT_RAW_PATH = runtime_path("data/raw/latest_prices.csv")
+DEFAULT_METADATA_PATH = runtime_path("data/raw/latest_prices.metadata.json")
+DEFAULT_PROCESSED_PATH = runtime_path("data/processed/vegetable_prices.csv")
+DEFAULT_PLANT_PATH = runtime_path("data/plants.csv")
 
 
 @dataclass(frozen=True)

@@ -15,11 +15,12 @@ from typing import Any, Iterable
 import pandas as pd
 import requests
 
+from src.runtime import runtime_path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
 XINFADI_PRICE_PAGE = "https://www.xinfadi.com.cn/priceDetail.html"
 XINFADI_API_URL = "https://www.xinfadi.com.cn/getPriceData.html"
-DEFAULT_FALLBACK_PATH = PROJECT_ROOT / "data" / "fallback" / "vegetable_prices.csv"
+DEFAULT_FALLBACK_PATH = runtime_path("data/fallback/vegetable_prices.csv")
 
 
 @dataclass(frozen=True)

@@ -1,4 +1,4 @@
-"""PvZ-inspired Streamlit dashboard for the V2.1.1 recommendation system."""
+"""PvZ-inspired Streamlit dashboard for the V2.1.2 recommendation system."""
 
 from __future__ import annotations
 
@@ -9,13 +9,19 @@ from pathlib import Path
 
 import streamlit as st
 
-from src.dashboard import (
-    PLANT_EMOJI,
-    ZOMBIE_MODES,
-    build_dashboard_model,
-    get_price_trend,
-)
-from src.user_data import prepare_uploaded_price_data
+RUNTIME_IMPORT_ERROR: ImportError | None = None
+try:
+    from src import __version__
+    from src.dashboard import (
+        PLANT_EMOJI,
+        ZOMBIE_MODES,
+        build_dashboard_model,
+        get_price_trend,
+    )
+    from src.runtime import find_missing_runtime_files
+    from src.user_data import prepare_uploaded_price_data
+except ImportError as exc:  # A damaged portable package may miss a module.
+    RUNTIME_IMPORT_ERROR = exc
 
 
 ROOT = Path(__file__).resolve().parent
@@ -24,6 +30,7 @@ TEMPLATE_PATH = ROOT / "data" / "templates" / "regional_prices_template.csv"
 ANALYSIS_MODEL_KEY = "analysis_model"
 ANALYSIS_PARAMS_KEY = "analysis_params"
 ANALYSIS_ERROR_KEY = "analysis_error"
+INCOMPLETE_PACKAGE_MESSAGE = "安装包不完整，请重新下载"
 
 
 @st.cache_data(show_spinner=False)
@@ -51,6 +58,26 @@ def load_styles() -> None:
     """Load the copyright-safe CSS theme from the project asset directory."""
 
     st.markdown(f"<style>{STYLE_PATH.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
+
+
+def get_missing_runtime_files() -> tuple[str, ...]:
+    """Check one installation without exposing absolute local paths."""
+
+    if RUNTIME_IMPORT_ERROR is not None:
+        return ("核心程序文件",)
+    return find_missing_runtime_files(ROOT)
+
+
+def render_incomplete_package_error(missing: tuple[str, ...]) -> None:
+    """Render a user-safe package error instead of a Python traceback."""
+
+    st.error(INCOMPLETE_PACKAGE_MESSAGE)
+    st.info(
+        "当前程序缺少必要运行文件，无法继续分析。请删除现有解压目录，"
+        "然后从 GitHub Releases 重新下载 v2.1.2 完整便携包。"
+    )
+    if missing:
+        st.caption("缺少文件：" + "、".join(missing))
 
 
 def stretch_width(component: object) -> dict[str, object]:
@@ -217,7 +244,7 @@ def render_hero(model: dict) -> None:
         f"""
         <section class="terminal-header" aria-label="末日菜园作战终端">
           <div class="terminal-brand">
-            <div class="terminal-kicker">GARDEN DEFENSE CONSOLE · V2.1.1</div>
+            <div class="terminal-kicker">GARDEN DEFENSE CONSOLE · V{escape(__version__)}</div>
             <h1>末日菜园作战室</h1>
           </div>
           <div class="terminal-readout" aria-label="当前分析场景">
@@ -853,6 +880,10 @@ def main() -> None:
         layout="wide",
         initial_sidebar_state="expanded",
     )
+    missing_runtime_files = get_missing_runtime_files()
+    if missing_runtime_files:
+        render_incomplete_package_error(missing_runtime_files)
+        return
     load_styles()
 
     with st.sidebar:
@@ -893,6 +924,8 @@ def main() -> None:
                         region_name,
                         uploaded_file,
                     )
+            except (FileNotFoundError, PermissionError):
+                st.session_state[ANALYSIS_ERROR_KEY] = INCOMPLETE_PACKAGE_MESSAGE
             except ValueError as exc:
                 st.session_state[ANALYSIS_ERROR_KEY] = str(exc)
             else:
@@ -927,7 +960,9 @@ def main() -> None:
 
     analysis_error = st.session_state.get(ANALYSIS_ERROR_KEY)
     model = st.session_state.get(ANALYSIS_MODEL_KEY)
-    if analysis_error:
+    if analysis_error == INCOMPLETE_PACKAGE_MESSAGE:
+        render_incomplete_package_error(())
+    elif analysis_error:
         st.error(f"地区菜价无法分析：{analysis_error}")
         st.info("可以先下载侧栏 CSV 模板，保留表头后替换成当地菜价。")
 
@@ -961,9 +996,9 @@ def main() -> None:
     render_technical_details(model)
 
     st.markdown(
-        """
+        f"""
         <footer class="page-footer">
-          <span>🌱 PvZ Economy Engine V2.1.1</span>
+          <span>🌱 PvZ Economy Engine V{escape(__version__)}</span>
           <span>数据分析与运筹优化练习 · 非官方游戏项目</span>
         </footer>
         """,

@@ -11,9 +11,9 @@ from typing import Iterable
 
 import pandas as pd
 
+from src.runtime import runtime_path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MAPPING_PATH = PROJECT_ROOT / "data" / "plants.csv"
+DEFAULT_MAPPING_PATH = runtime_path("data/plants.csv")
 
 REQUIRED_COLUMNS = (
     "name",
