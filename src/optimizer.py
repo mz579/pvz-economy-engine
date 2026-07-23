@@ -351,7 +351,10 @@ def _solve_greedy(
 def _greedy_rank(row: pd.Series) -> tuple[float, float, float]:
     score = float(row["_score"])
     cost = float(row["sun_cost"])
-    efficiency = float("inf") if cost == 0 and score > 0 else score / max(cost, 1)
+    if cost == 0:
+        efficiency = float("inf") if score > 0 else float("-inf")
+    else:
+        efficiency = score / cost
     return efficiency, score, -cost
 
 
@@ -429,7 +432,29 @@ def _build_result(
         if unused_cells:
             reason += f" 本轮保留 {unused_cells} 个空格；{unused_cells_reason}"
     else:
-        reason = "当前阳光、格子或植物类型不足，无法同时满足全部组合约束。"
+        attack_candidates = data.loc[data["_is_attack"]]
+        support_candidates = data.loc[data["_is_support"]]
+        if attack_candidates.empty:
+            reason = "植物表中没有攻击候选植物，请检查 plants.csv"
+        elif support_candidates.empty:
+            reason = "植物表中没有防御或控制候选植物，请检查 plants.csv"
+        else:
+            min_sun_cost = _display_number(
+                float(attack_candidates["sun_cost"].min())
+                + float(support_candidates["sun_cost"].min())
+            )
+            if available_sun < min_sun_cost:
+                reason = (
+                    f"当前阳光 ({available_sun}) 不足以同时部署攻击与防御植物，"
+                    f"最少需要 {min_sun_cost} 阳光"
+                )
+            elif available_cells < 2:
+                reason = (
+                    f"当前格子 ({available_cells}) 不足，"
+                    "至少需要 2 格来部署攻击与防御植物"
+                )
+            else:
+                reason = "当前阳光、格子或植物类型不足，无法同时满足全部组合约束。"
 
     displayed_sun = _display_number(total_sun)
     rounded_score = round(total_score, 4)

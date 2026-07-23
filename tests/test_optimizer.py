@@ -101,6 +101,51 @@ class PlantingOptimizerTests(unittest.TestCase):
         self.assertEqual(result["method"], "greedy")
         self.assert_valid_result(result, 75, 4)
 
+    def test_negative_score_zero_cost_not_selected_by_greedy(self) -> None:
+        plants = pd.DataFrame(
+            [
+                {
+                    "name": "正分攻击",
+                    "sun_cost": 50,
+                    "score": 10,
+                    "attack": 8,
+                    "defense": 2,
+                    "control": 0,
+                    "category": "攻击",
+                    "role": "输出",
+                },
+                {
+                    "name": "正分防御",
+                    "sun_cost": 25,
+                    "score": 5,
+                    "attack": 0,
+                    "defense": 8,
+                    "control": 0,
+                    "category": "防御",
+                    "role": "防御",
+                },
+                {
+                    "name": "负分零费",
+                    "sun_cost": 0,
+                    "score": -1,
+                    "attack": 1,
+                    "defense": 1,
+                    "control": 0,
+                    "category": "攻击",
+                    "role": "陷阱",
+                },
+            ]
+        )
+        result = optimize_planting(
+            plants,
+            available_sun=100,
+            available_cells=10,
+            use_pulp=False,
+        )
+
+        self.assert_valid_result(result, 100, 10)
+        self.assertNotIn("负分零费", result["strategy"])
+
     def test_quantity_limit_uses_ceil_at_requested_lawn_sizes(self) -> None:
         expected = {1: 1, 2: 1, 3: 1, 10: 3, 20: 6}
         for cells, limit in expected.items():

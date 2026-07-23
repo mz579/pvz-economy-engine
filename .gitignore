@@ -27,3 +27,6 @@ data/custom/
 
 # Legacy cache path kept out of version control during migration.
 data/beijing/
+
+# Personal documents.
+*.docx

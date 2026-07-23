@@ -169,13 +169,16 @@ def calculate_apocalypse_scores(
 
     attack = pd.to_numeric(scored["attack"], errors="coerce").fillna(0)
     maximum_attack = float(attack.max())
-    scored["attack_score"] = 0.0 if maximum_attack <= 0 else attack / maximum_attack * 10
+    if maximum_attack <= 0:
+        raise ValueError("所有植物的攻击值均为 0，无法进行攻击分标准化")
+    scored["attack_score"] = attack / maximum_attack * 10
     scored["defense_score"] = pd.to_numeric(scored["defense"], errors="coerce")
     scored["production_score"] = pd.to_numeric(scored["production"], errors="coerce")
     scored["control_score"] = pd.to_numeric(scored["control"], errors="coerce")
     if "special_score" in scored.columns:
         special = pd.to_numeric(scored["special_score"], errors="coerce")
     else:
+        # Empty-string default is intentional: unmapped tags fall through .map() to NaN, then fillna(5.0)
         tags = scored.get("special_tag", pd.Series("", index=scored.index))
         special = tags.astype(str).str.upper().map(SPECIAL_ABILITY_SCORES)
     scored["special_score"] = special.fillna(5.0)
@@ -225,6 +228,10 @@ def calculate_apocalypse_scores(
 def explain_score(row: pd.Series | Mapping[str, Any]) -> str:
     """Generate a concise, component-based Chinese explanation for one score."""
 
+    # Normalize to dict for consistent access; pd.Series also supports .get()
+    if not isinstance(row, pd.Series):
+        row = pd.Series(row)
+
     contributions = {
         dimension: float(row[f"{dimension}_contribution"])
         for dimension in DEFAULT_WEIGHTS
@@ -232,7 +239,7 @@ def explain_score(row: pd.Series | Mapping[str, Any]) -> str:
     strongest = sorted(contributions, key=contributions.get, reverse=True)[:2]
     strengths = "、".join(DIMENSION_LABELS[item] for item in strongest)
 
-    undervaluation = float(row["price_undervaluation"])
+    undervaluation = float(row.get("price_undervaluation", 1.0))
     if undervaluation >= 1.05:
         price_text = f"现价低于 30 日均值，低估系数 {undervaluation:.2f}"
     elif undervaluation <= 0.95:
@@ -240,10 +247,14 @@ def explain_score(row: pd.Series | Mapping[str, Any]) -> str:
     else:
         price_text = f"现价接近 30 日均值，低估系数 {undervaluation:.2f}"
 
-    stability = float(row["stability_coefficient"])
+    stability = float(row.get("stability_coefficient", 1.0))
     stability_text = "价格较稳定" if stability >= 0.90 else "价格波动需留意"
-    sun_text = f"有效阳光成本 {float(row['effective_sun_cost']):g}"
-    if float(row["sun_cost"]) < float(row["effective_sun_cost"]):
+    effective_sun_cost = float(
+        row.get("effective_sun_cost", MIN_EFFECTIVE_SUN_COST)
+    )
+    sun_cost = float(row.get("sun_cost", effective_sun_cost))
+    sun_text = f"有效阳光成本 {effective_sun_cost:g}"
+    if sun_cost < effective_sun_cost:
         sun_text += "（零/低费保护值）"
     return (
         f"主要优势是{strengths}；{price_text}；{stability_text}，"
