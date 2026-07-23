@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import warnings
 
 import pandas as pd
 
@@ -72,7 +73,16 @@ def build_dashboard_model(
     processed_path: Path | str = DEFAULT_PROCESSED_PATH,
     price_data: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
-    """Build the explainable, optimizer-ready model consumed by Streamlit."""
+    """Build the Streamlit model from either processed_path or price_data.
+
+    When price_data is provided, processed_path is ignored.
+    """
+
+    if price_data is not None and processed_path != DEFAULT_PROCESSED_PATH:
+        warnings.warn(
+            "同时提供了 price_data 和 processed_path，processed_path 将被忽略",
+            UserWarning,
+        )
 
     if zombie_mode not in ZOMBIE_MODES:
         raise ValueError(f"未知僵尸模式: {zombie_mode}")
@@ -114,6 +124,15 @@ def build_dashboard_model(
     }
     data_source = "、".join(_source_label(item, source_labels) for item in sources)
     price_unit = str(prices.attrs.get("price_unit", NORMALIZED_PRICE_UNIT))
+    data_days_old = int(prices.attrs.get("data_days_old", 0))
+    stale_warning = (
+        None
+        if data_days_old < 60
+        else (
+            f"离线示例数据已有 {data_days_old} 天未更新，建议执行 "
+            "python -m src.pipeline --online 获取最新价格"
+        )
+    )
     candidate_comparison = build_candidate_comparison(
         all_plants,
         ranking,
@@ -137,6 +156,8 @@ def build_dashboard_model(
         "data_source": data_source,
         "data_mode": _data_mode_label(sources),
         "price_unit": price_unit,
+        "data_days_old": data_days_old,
+        "stale_warning": stale_warning,
         "candidate_comparison": candidate_comparison,
         "score_label": "末日性价比指数",
         "score_notice": "战斗价值 × 价格低估系数 × 稳定性系数 ÷ 有效阳光成本",
@@ -242,14 +263,22 @@ def build_candidate_comparison(
     ).reset_index(drop=True)
 
 
-def get_price_trend(prices: pd.DataFrame, vegetable_name: str) -> pd.DataFrame:
-    """Return one vegetable's ordered date/price series for charting."""
+def get_price_trend(
+    prices: pd.DataFrame,
+    vegetable_name: str,
+    include_ma: bool = False,
+) -> pd.DataFrame:
+    """Return one vegetable's ordered price series and optional moving averages."""
 
-    return (
+    trend = (
         prices.loc[prices["name"] == vegetable_name, ["date", "price"]]
         .sort_values("date")
         .reset_index(drop=True)
     )
+    if include_ma:
+        trend["price_ma7"] = trend["price"].rolling(7, min_periods=1).mean()
+        trend["price_ma30"] = trend["price"].rolling(30, min_periods=1).mean()
+    return trend
 
 
 def build_recommendation_reasons(

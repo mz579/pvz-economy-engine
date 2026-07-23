@@ -6,7 +6,9 @@ from html import escape
 import inspect
 from math import isfinite
 from pathlib import Path
+from typing import Any
 
+import pandas as pd
 import streamlit as st
 
 RUNTIME_IMPORT_ERROR: ImportError | None = None
@@ -30,11 +32,17 @@ TEMPLATE_PATH = ROOT / "data" / "templates" / "regional_prices_template.csv"
 ANALYSIS_MODEL_KEY = "analysis_model"
 ANALYSIS_PARAMS_KEY = "analysis_params"
 ANALYSIS_ERROR_KEY = "analysis_error"
+ZOMBIE_MODE_INPUT_KEY = "zombie_mode_input"
+AVAILABLE_SUN_INPUT_KEY = "available_sun_input"
+AVAILABLE_CELLS_INPUT_KEY = "available_cells_input"
+DEFAULT_ZOMBIE_MODE = "均衡巡逻"
+DEFAULT_AVAILABLE_SUN = 150
+DEFAULT_AVAILABLE_CELLS = 20
 INCOMPLETE_PACKAGE_MESSAGE = "安装包不完整，请重新下载"
 
 
 @st.cache_data(show_spinner=False)
-def get_dashboard_model(mode: str, sun: int, cells: int) -> dict:
+def get_dashboard_model(mode: str, sun: int, cells: int) -> dict[str, Any]:
     """Cache deterministic model results by the visible UI parameters."""
 
     return build_dashboard_model(mode, sun, cells)
@@ -47,7 +55,7 @@ def get_uploaded_dashboard_model(
     cells: int,
     region_name: str,
     csv_content: bytes,
-) -> dict:
+) -> dict[str, Any]:
     """Prepare one uploaded region and calculate its recommendation."""
 
     prices = prepare_uploaded_price_data(csv_content, region_name=region_name)
@@ -80,14 +88,14 @@ def render_incomplete_package_error(missing: tuple[str, ...]) -> None:
         st.caption("缺少文件：" + "、".join(missing))
 
 
-def stretch_width(component: object) -> dict[str, object]:
+def stretch_width(component: Any) -> dict[str, Any]:
     """Use the current width API while retaining Streamlit 1.28 compatibility."""
 
     parameters = inspect.signature(component).parameters
     return {"width": "stretch"} if "width" in parameters else {"use_container_width": True}
 
 
-def format_number(value: object, *, decimals: int = 2, missing: str = "—") -> str:
+def format_number(value: Any, *, decimals: int = 2, missing: str = "—") -> str:
     """Format numeric view data without turning missing values into zeroes."""
 
     try:
@@ -99,7 +107,7 @@ def format_number(value: object, *, decimals: int = 2, missing: str = "—") -> 
     return f"{number:.{decimals}f}"
 
 
-def format_price(value: object, unit: object) -> str:
+def format_price(value: Any, unit: Any) -> str:
     """Format one real price with its model-provided normalized unit."""
 
     number = format_number(value, missing="")
@@ -108,7 +116,7 @@ def format_price(value: object, unit: object) -> str:
     return f"{number} {unit}"
 
 
-def chart_data_state(data: object, columns: list[str]) -> str:
+def chart_data_state(data: pd.DataFrame | None, columns: list[str]) -> str:
     """Classify chart input so empty or single-value data never renders badly."""
 
     if data is None or bool(getattr(data, "empty", True)):
@@ -147,8 +155,8 @@ def build_submitted_dashboard_model(
     available_sun: int,
     available_cells: int,
     region_name: str,
-    uploaded_file: object | None,
-) -> dict:
+    uploaded_file: Any | None,
+) -> dict[str, Any]:
     """Calculate a model only for an explicit form submission."""
 
     if uploaded_file is None:
@@ -160,6 +168,17 @@ def build_submitted_dashboard_model(
         region_name,
         uploaded_file.getvalue(),
     )
+
+
+def reset_sidebar_defaults() -> None:
+    """Restore the visible combat parameters without submitting the form."""
+
+    for key in (
+        ZOMBIE_MODE_INPUT_KEY,
+        AVAILABLE_SUN_INPUT_KEY,
+        AVAILABLE_CELLS_INPUT_KEY,
+    ):
+        st.session_state.pop(key, None)
 
 
 def render_sidebar_status() -> None:
@@ -223,7 +242,7 @@ def render_waiting_state() -> None:
     )
 
 
-def render_hero(model: dict) -> None:
+def render_hero(model: dict[str, Any]) -> None:
     """Render the compact command terminal header for the submitted analysis."""
 
     mode = model["mode"]
@@ -261,10 +280,13 @@ def render_hero(model: dict) -> None:
     )
 
 
-def build_lawn_slots(model: dict, available_cells: int) -> list[dict[str, object]]:
+def build_lawn_slots(
+    model: dict[str, Any],
+    available_cells: int,
+) -> list[dict[str, Any]]:
     """Expand the recommendation into an exact-capacity display-only lawn."""
 
-    slots: list[dict[str, object]] = []
+    slots: list[dict[str, Any]] = []
     for item in model["result"]["combination"]:
         quantity = int(item["quantity"])
         for _ in range(quantity):
@@ -275,7 +297,15 @@ def build_lawn_slots(model: dict, available_cells: int) -> list[dict[str, object
                     "occupied": True,
                 }
             )
-    slots = slots[:available_cells]
+    total_generated = len(slots)
+    if total_generated > available_cells:
+        import logging
+
+        logging.warning(
+            f"Lawn slots ({total_generated}) exceed capacity ({available_cells}); clipping"
+        )
+        # Safety guard: keep the display lawn within its available capacity.
+        slots = slots[:available_cells]
     slots.extend(
         {"name": "空格", "emoji": "", "occupied": False}
         for _ in range(available_cells - len(slots))
@@ -284,7 +314,7 @@ def build_lawn_slots(model: dict, available_cells: int) -> list[dict[str, object
 
 
 def render_recommendation_summary(
-    model: dict,
+    model: dict[str, Any],
     available_sun: int,
     available_cells: int,
 ) -> None:
@@ -414,7 +444,7 @@ def render_recommendation_summary(
     )
 
 
-def render_coverage_notice(model: dict) -> None:
+def render_coverage_notice(model: dict[str, Any]) -> None:
     """Make partial user-data coverage explicit without treating it as failure."""
 
     coverage = model["coverage"]
@@ -436,7 +466,7 @@ def render_coverage_notice(model: dict) -> None:
     )
 
 
-def render_candidate_comparison(model: dict) -> None:
+def render_candidate_comparison(model: dict[str, Any]) -> None:
     """Compare every mapped and unmapped plant without inventing market data."""
 
     section_header(
@@ -514,7 +544,7 @@ def render_candidate_comparison(model: dict) -> None:
         )
 
 
-def render_constraint_bar(result: dict) -> None:
+def render_constraint_bar(result: dict[str, Any]) -> None:
     labels = {
         "sun_limit": "阳光预算",
         "cell_limit": "格子上限",
@@ -530,7 +560,7 @@ def render_constraint_bar(result: dict) -> None:
     st.markdown(f'<div class="constraint-row">{chips}</div>', unsafe_allow_html=True)
 
 
-def render_reasons(model: dict) -> None:
+def render_reasons(model: dict[str, Any]) -> None:
     """Explain each selected plant with four short, model-backed facts."""
 
     ranking = model["ranking"].set_index("name")
@@ -607,7 +637,7 @@ def section_header(kicker: str, title: str, copy: str) -> None:
     )
 
 
-def render_market_section(model: dict) -> None:
+def render_market_section(model: dict[str, Any]) -> None:
     """Render price evidence after the recommendation and its reasons."""
 
     coverage = model["coverage"]
@@ -665,11 +695,26 @@ def render_market_section(model: dict) -> None:
             )
         else:
             selected_vegetable = st.selectbox("查看蔬菜价格", vegetables)
-            trend = get_price_trend(model["prices"], selected_vegetable)
-            trend_state = chart_data_state(trend, ["price"])
+            trend = get_price_trend(
+                model["prices"],
+                selected_vegetable,
+                include_ma=True,
+            )
+            trend_columns = ["price", "price_ma7", "price_ma30"]
+            trend_state = chart_data_state(trend, trend_columns)
             if trend_state == "chart":
+                trend_chart = (
+                    trend.set_index("date")[trend_columns]
+                    .rename(
+                        columns={
+                            "price": "日价格",
+                            "price_ma7": "7日均价",
+                            "price_ma30": "30日均价",
+                        }
+                    )
+                )
                 st.line_chart(
-                    trend.set_index("date")[["price"]],
+                    trend_chart,
                     height=310,
                     **stretch_width(st.line_chart),
                 )
@@ -740,7 +785,7 @@ def render_market_section(model: dict) -> None:
         )
 
 
-def render_technical_details(model: dict) -> None:
+def render_technical_details(model: dict[str, Any]) -> None:
     """Keep solver, formula, constraints and raw model state below the results."""
 
     result = model["result"]
@@ -892,10 +937,25 @@ def main() -> None:
             zombie_mode = st.selectbox(
                 "僵尸模式",
                 options=list(ZOMBIE_MODES),
+                key=ZOMBIE_MODE_INPUT_KEY,
                 help="提交分析后，敌情会调整五项战斗价值权重。",
             )
-            available_sun = st.slider("☀️ 可用阳光", 50, 500, 150, 25)
-            available_cells = st.slider("🌱 草坪格子", 5, 45, 20, 5)
+            available_sun = st.slider(
+                "☀️ 可用阳光",
+                50,
+                500,
+                DEFAULT_AVAILABLE_SUN,
+                25,
+                key=AVAILABLE_SUN_INPUT_KEY,
+            )
+            available_cells = st.slider(
+                "🌱 草坪格子",
+                5,
+                45,
+                DEFAULT_AVAILABLE_CELLS,
+                5,
+                key=AVAILABLE_CELLS_INPUT_KEY,
+            )
             st.markdown('<div class="form-section-label">📍 地区菜价（可选）</div>', unsafe_allow_html=True)
             region_name = st.text_input(
                 "地区名称",
@@ -912,6 +972,19 @@ def main() -> None:
                 "🚀 开始分析",
                 type="primary",
                 **stretch_width(st.form_submit_button),
+            )
+
+        if (
+            zombie_mode != DEFAULT_ZOMBIE_MODE
+            or available_sun != DEFAULT_AVAILABLE_SUN
+            or available_cells != DEFAULT_AVAILABLE_CELLS
+        ):
+            st.button(
+                "🔄 恢复默认",
+                key="reset_defaults",
+                type="secondary",
+                on_click=reset_sidebar_defaults,
+                **stretch_width(st.button),
             )
 
         if submitted:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -127,20 +127,24 @@ def load_or_build_processed_prices(
 
     target = Path(path)
     if not target.is_file():
-        return run_data_pipeline(
+        data = run_data_pipeline(
             prefer_network=prefer_network,
             processed_path=target,
         ).data
-    data = pd.read_csv(target, parse_dates=["date"])
-    required = {"date", "name", "price", "source", "historical_mean", "volatility"}
-    missing = required.difference(data.columns)
-    missing_names = _required_vegetable_names().difference(data.get("name", []))
-    if missing or missing_names:
-        return run_data_pipeline(
-            prefer_network=prefer_network,
-            processed_path=target,
-        ).data
-    data.attrs["price_unit"] = NORMALIZED_PRICE_UNIT
+    else:
+        data = pd.read_csv(target, parse_dates=["date"])
+        required = {"date", "name", "price", "source", "historical_mean", "volatility"}
+        missing = required.difference(data.columns)
+        missing_names = _required_vegetable_names().difference(data.get("name", []))
+        if missing or missing_names:
+            data = run_data_pipeline(
+                prefer_network=prefer_network,
+                processed_path=target,
+            ).data
+        else:
+            data.attrs["price_unit"] = NORMALIZED_PRICE_UNIT
+    data_days_old = (date.today() - data["date"].max().date()).days
+    data.attrs["data_days_old"] = data_days_old
     return data
 
 

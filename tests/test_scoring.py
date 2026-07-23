@@ -69,6 +69,26 @@ class ApocalypseScoringTests(unittest.TestCase):
         self.assertEqual(scored.iloc[0]["effective_sun_cost"], 25)
         self.assertIn("保护值", scored.iloc[0]["recommendation_reason"])
 
+    def test_all_zero_attack_raises_value_error(self) -> None:
+        plants = pd.DataFrame(
+            [
+                {
+                    "name": "无攻击植物",
+                    "vegetable_name": "测试菜",
+                    "sun_cost": 100,
+                    "attack": 0,
+                    "defense": 5,
+                    "production": 0,
+                    "control": 0,
+                    "special_ability": "测试",
+                    "role": "测试",
+                }
+            ]
+        )
+        with self.assertRaises(ValueError) as context:
+            calculate_apocalypse_scores(plants, self._single_price())
+        self.assertIn("攻击", str(context.exception))
+
     def test_bundled_mapping_produces_complete_ranking(self) -> None:
         plants = load_plant_mapping()
         prices = load_or_build_processed_prices()

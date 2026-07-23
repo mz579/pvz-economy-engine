@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import redirect_stdout
+import json
 from pathlib import Path
 import sys
 
@@ -39,6 +41,17 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--region", default="命令行地区", help="CSV 对应地区名称")
     parser.add_argument("--top", type=int, default=15, help="显示前 N 名植物")
     parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="将推荐结果保存为 JSON 文件",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="将推荐结果以 JSON 格式输出到标准输出",
+    )
+    parser.add_argument(
         "--processed-output",
         type=Path,
         default=DEFAULT_PROCESSED_PATH,
@@ -51,6 +64,7 @@ def main() -> int:
     args = _build_parser().parse_args()
     if args.top < 1:
         raise SystemExit("--top 必须大于 0")
+    text_output = sys.stderr if args.json else sys.stdout
 
     if args.csv is not None:
         if args.online:
@@ -79,10 +93,14 @@ def main() -> int:
         )
         data_message = artifacts.collection.message
 
-    print(f"数据：{data_message}")
-    print(f"模式：{args.mode}")
-    print("评分权重：" + "，".join(f"{key}={value:.3f}" for key, value in model["weights"].items()))
-    print("\n末日性价比排名：")
+    print(f"数据：{data_message}", file=text_output)
+    print(f"模式：{args.mode}", file=text_output)
+    print(
+        "评分权重："
+        + "，".join(f"{key}={value:.3f}" for key, value in model["weights"].items()),
+        file=text_output,
+    )
+    print("\n末日性价比排名：", file=text_output)
     columns = [
         "rank",
         "name",
@@ -93,19 +111,59 @@ def main() -> int:
         "stability_coefficient",
         "apocalypse_index",
     ]
-    print(model["ranking"].head(args.top)[columns].to_string(index=False))
-    print()
+    print(
+        model["ranking"].head(args.top)[columns].to_string(index=False),
+        file=text_output,
+    )
+    print(file=text_output)
     result = model["result"]
     print(
         "集中度约束：每种植物最多占草坪容量的 "
-        f"{result['max_plant_share']:.0%}，本轮最多 {result['per_plant_limit']} 株。"
+        f"{result['max_plant_share']:.0%}，本轮最多 {result['per_plant_limit']} 株。",
+        file=text_output,
     )
-    print_strategy(model["result"])
+    with redirect_stdout(text_output):
+        print_strategy(model["result"])
+
+    ranking_columns = [
+        "rank",
+        "name",
+        "vegetable_name",
+        "current_price",
+        "apocalypse_index",
+    ]
+    output_data = {
+        "version": __version__,
+        "mode": args.mode,
+        "weights": model["weights"],
+        "ranking": model["ranking"]
+        .head(args.top)[ranking_columns]
+        .to_dict(orient="records"),
+        "recommendation": result["strategy"],
+        "total_score": result["total_score"],
+        "total_sun_cost": result["total_sun_cost"],
+        "total_plants": result["total_plants"],
+        "unused_cells": result["unused_cells"],
+        "method": result["method"],
+        "status": result["status"],
+    }
+
+    if args.output is not None:
+        with args.output.open("w", encoding="utf-8") as output_file:
+            json.dump(output_data, output_file, ensure_ascii=False, indent=2)
+        print(f"结果已保存至：{args.output}", file=text_output)
 
     if model["reasons"]:
-        print("推荐理由：")
+        print("推荐理由：", file=text_output)
         for reason in model["reasons"]:
-            print(f"- {reason['name']}×{reason['quantity']}：{reason['text']}")
+            print(
+                f"- {reason['name']}×{reason['quantity']}：{reason['text']}",
+                file=text_output,
+            )
+
+    if args.json:
+        json.dump(output_data, sys.stdout, ensure_ascii=False, indent=2)
+        sys.stdout.write("\n")
     return 0 if model["result"]["all_constraints_met"] else 2
 
 
