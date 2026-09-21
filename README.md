@@ -219,6 +219,44 @@ python cli.py --online --mode "尸潮来袭" --sun 200 --cells 25
 
 截图存放在 `docs/screenshots/dashboard.png` 和 `docs/screenshots/dashboard-mobile.png`，详细采集说明见 `docs/screenshots/README.md`。
 
+## 自动调度（Airflow）
+
+`airflow/dags/pvz_dag.py` 提供每日自动跑通全链路的 DAG，任务依赖为：
+
+```text
+run_pipeline  →  score_and_optimize  →  persist_strategy
+采集+清洗+特征     多因子评分 + 约束优化      策略落盘 JSON
+```
+
+| 项目 | 说明 |
+|---|---|
+| DAG ID | `pvz_economy_engine` |
+| 调度 | `@daily`，`catchup=False` |
+| 重试 | 2 次，间隔 5 分钟 |
+| 产物 | `data/processed/daily_strategy.json` |
+
+**依赖是分开的**：Airflow 会引入约 200MB+ 的传递依赖，而核心运行时（看板 / CLI）并不需要它，所以单独放在 `requirements-airflow.txt`：
+
+```bash
+pip install -r requirements-airflow.txt
+```
+
+**不启动调度器也能验证链路**——DAG 文件带 `__main__` 分支，会顺序直调三个任务函数：
+
+```bash
+python airflow/dags/pvz_dag.py
+```
+
+输出会依次打印采集摘要、推荐阵容与约束校验结果，最后写入 `daily_strategy.json`。
+
+### 一处诚实说明：在线数据源只有一个
+
+V1 曾在 DAG 中声明“多地区并行”（新发地 / 寿光 / 广州）。**V2 重写后，在线采集只保留新发地（北京）一个源**，
+山东寿光与广州江南只剩仓库内的数据文件，没有对应的在线采集适配器。因此 V2 的 DAG
+不再声明多地区并行——写作 `REGIONS` 循环只会得到一个跑不通的装饰。
+
+断网或网站结构变化时，`run_data_pipeline` 会自动回退本地 CSV，任务不会因网络失败而中断。
+
 ## 模型局限性
 
 - 末日性价比指数不是百分制、收益率或成功概率，也不承诺现实种植收益；它只比较当前候选植物。

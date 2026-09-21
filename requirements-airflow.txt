@@ -1,0 +1,11 @@
+# Airflow 调度依赖（可选）
+#
+# 仅当需要运行 airflow/dags/pvz_dag.py 时安装：
+#     pip install -r requirements-airflow.txt
+#
+# 为什么与 requirements.txt 分开：
+#   Airflow 会引入大量传递依赖（约 200MB+），而核心运行时
+#   （Streamlit 看板 / CLI）并不需要它。分开可以让只想跑看板的人
+#   保持环境轻量，云上调度环境再单独装这一份。
+
+apache-airflow>=2.9,<3.0
