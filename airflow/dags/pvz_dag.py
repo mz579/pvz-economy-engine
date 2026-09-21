@@ -21,11 +21,13 @@ V2 的在线数据源仅新发地（北京）；山东寿光与广州江南以�
 
 用法
 ----
-本地验证（不启动 Airflow 调度器）::
+本地验证（**不需要安装 Airflow，也不需要启动调度器**）::
 
     python airflow/dags/pvz_dag.py
 
-该 `__main__` 分支会按顺序直接调用三个 task 函数，用于确认链路可跑通。
+该 `__main__` 分支会按顺序直接调用三个 task 函数（XCom 用字典模拟），
+用于确认链路可跑通。文件顶部的 Airflow 导入做了兜底，未安装时跳过
+DAG 装配，因此这个冒烟入口在任何环境下都可用。
 """
 from __future__ import annotations
 
@@ -34,8 +36,16 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from airflow import DAG
-from airflow.operators.python import PythonOperator
+try:
+    from airflow import DAG
+    from airflow.operators.python import PythonOperator
+except ModuleNotFoundError:  # pragma: no cover - 仅在未安装 Airflow 时命中
+    # Airflow 是可选依赖（requirements-airflow.txt）。这里做导入兜底，
+    # 是为了让 `python airflow/dags/pvz_dag.py` 的冒烟分支在没有 Airflow
+    # 的环境里也能跑通——否则文件会在 import 阶段就崩，冒烟分支永远到不了。
+    # DAG 装配部分会自动跳过，任务函数本身与 Airflow 无关。
+    DAG = None
+    PythonOperator = None
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -170,29 +180,34 @@ def task_persist_strategy(**context) -> dict:
     return {"strategy_path": str(STRATEGY_PATH)}
 
 
-with DAG(
-    "pvz_economy_engine",
-    default_args=DEFAULT_ARGS,
-    description="每日菜价采集 → 多因子评分 → 约束优化 → 策略落盘",
-    schedule="@daily",
-    start_date=datetime(2026, 7, 11),
-    catchup=False,
-    tags=["pvz", "data-engineering"],
-) as dag:
-    run_pipeline = PythonOperator(
-        task_id="run_pipeline",
-        python_callable=task_run_pipeline,
-    )
-    score_and_optimize = PythonOperator(
-        task_id="score_and_optimize",
-        python_callable=task_score_and_optimize,
-    )
-    persist_strategy = PythonOperator(
-        task_id="persist_strategy",
-        python_callable=task_persist_strategy,
-    )
+if DAG is None:
+    # 未安装 Airflow：跳过 DAG 装配。任务函数仍然可用，
+    # `python airflow/dags/pvz_dag.py` 的冒烟分支与测试都不依赖这一块。
+    dag = None
+else:
+    with DAG(
+        "pvz_economy_engine",
+        default_args=DEFAULT_ARGS,
+        description="每日菜价采集 → 多因子评分 → 约束优化 → 策略落盘",
+        schedule="@daily",
+        start_date=datetime(2026, 7, 11),
+        catchup=False,
+        tags=["pvz", "data-engineering"],
+    ) as dag:
+        run_pipeline = PythonOperator(
+            task_id="run_pipeline",
+            python_callable=task_run_pipeline,
+        )
+        score_and_optimize = PythonOperator(
+            task_id="score_and_optimize",
+            python_callable=task_score_and_optimize,
+        )
+        persist_strategy = PythonOperator(
+            task_id="persist_strategy",
+            python_callable=task_persist_strategy,
+        )
 
-    run_pipeline >> score_and_optimize >> persist_strategy
+        run_pipeline >> score_and_optimize >> persist_strategy
 
 
 if __name__ == "__main__":

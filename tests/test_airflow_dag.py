@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import runpy
+import subprocess
 import sys
 import tempfile
 import types
@@ -137,6 +138,27 @@ class AirflowDagTests(unittest.TestCase):
 
         self.assertEqual(payload["pipeline"]["rows"], pipeline["rows"])
         self.assertEqual(payload["strategy"]["combination"], strategy["combination"])
+
+    def test_smoke_entrypoint_runs_without_airflow_installed(self) -> None:
+        """`python airflow/dags/pvz_dag.py` 在未安装 Airflow 的环境下必须能跑通。
+
+        文件顶部对 Airflow 导入做了兜底。若哪天有人把它改回无条件导入，
+        这个用例会立刻失败——否则 README 里"不装 Airflow 也能验证链路"
+        的说法就会变成空话（曾真实发生过一次）。
+        """
+        result = subprocess.run(
+            [sys.executable, str(DAG_PATH)],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+
+        self.assertEqual(result.returncode, 0, f"退出码非 0\nstderr:\n{result.stderr}")
+        self.assertNotIn("ModuleNotFoundError", result.stderr)
+        self.assertIn("[run_pipeline]", result.stdout)
+        self.assertIn("[score_and_optimize]", result.stdout)
+        self.assertIn("[persist_strategy]", result.stdout)
 
 
 if __name__ == "__main__":
