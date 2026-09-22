@@ -11,6 +11,7 @@ Airflow 本身是可选依赖（见 requirements-airflow.txt），未安装时�
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import runpy
 import subprocess
@@ -151,6 +152,14 @@ class AirflowDagTests(unittest.TestCase):
             cwd=str(ROOT),
             capture_output=True,
             text=True,
+            # 必须显式固定为 UTF-8：DAG 会打印中文，而 text=True 在未指定
+            # encoding 时用系统 locale（中文 Windows 为 GBK）解码。若父进程
+            # 按 GBK 解 UTF-8 字节，读取线程会抛 UnicodeDecodeError 并把
+            # stdout 置为 None，断言随即以 TypeError 失败。同一份代码在
+            # 有无 PYTHONIOENCODING 的环境下表现不同，属于环境相关的偶发失败。
+            encoding="utf-8",
+            errors="replace",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             timeout=300,
         )
 
