@@ -5,6 +5,34 @@ services:
     ports:
       - 8501:8501
     volumes:
+      # 容器内以非 root 用户运行；若宿主机 ./data 不可写，请调整目录权限。
       - ./data:/app/data
     environment:
       - PVZ_DATA_SOURCE=local_csv
+
+  # ---------------------------------------------------------------------------
+  # 可选：Postgres 服务示例（默认关闭）
+  #
+  # 当前应用默认使用 SQLite（data/pvz.db）。下面的配置只是未来接入 Postgres
+  # 的示例，属于可选/未来项：直接取消注释并不会自动切换存储后端，还需要在
+  # 存储层增加 PostgreSQL 连接与 SQL 适配后再启用。
+  #
+  # postgres:
+  #   image: postgres:16-alpine
+  #   ports:
+  #     - "5432:5432"
+  #   environment:
+  #     - POSTGRES_DB=pvz
+  #     - POSTGRES_USER=pvz
+  #     - POSTGRES_PASSWORD=pvz_dev_only
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U pvz -d pvz"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #
+  # volumes:
+  #   pgdata:
+  # ---------------------------------------------------------------------------
