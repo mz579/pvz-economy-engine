@@ -785,6 +785,44 @@ def render_market_section(model: dict[str, Any]) -> None:
         )
 
 
+def render_lane_defense(result: dict[str, Any]) -> None:
+    """Show the read-only V3 lane deployment without changing selections."""
+
+    lane_defense = result.get("lane_defense") or {}
+    lanes = lane_defense.get("lanes") or []
+    if not lanes:
+        st.caption("本轮方案未生成车道部署（方案不可行或没有可分配的植物）。")
+        return
+
+    weakest_lane = lane_defense.get("weakest_lane")
+    rows = []
+    for lane in lanes:
+        plants = lane.get("plants") or {}
+        plant_text = "、".join(
+            f"{name}×{count}" for name, count in plants.items()
+        ) or "—"
+        rows.append(
+            {
+                "车道": f"#{lane['lane']}",
+                "占格": f"{lane['cells']} / {lane['capacity']}",
+                "DPS": format_number(lane["dps"], decimals=2),
+                "防御": format_number(lane["defense"], decimals=1),
+                "存活分": format_number(lane["survivability"], decimals=1),
+                "植物": plant_text,
+                "状态": "⚠️ 最弱" if lane["lane"] == weakest_lane else "",
+            }
+        )
+
+    st.dataframe(rows, hide_index=True, **stretch_width(st.dataframe))
+    st.caption(
+        f"共 {lane_defense.get('lanes_count', len(lanes))} 条车道；"
+        f"最弱车道 #{weakest_lane} 的存活分为 "
+        f"{format_number(lane_defense.get('weakest_survivability', 0), decimals=1)}。"
+        "存活分 = DPS × 模拟时长 + 0.1 × 防御；车道分配只用于核对现有选株，"
+        "不会改变各植物数量。"
+    )
+
+
 def render_technical_details(model: dict[str, Any]) -> None:
     """Keep solver, formula, constraints and raw model state below the results."""
 
@@ -836,8 +874,17 @@ def render_technical_details(model: dict[str, Any]) -> None:
     )
 
     with st.expander("模型说明与技术细节"):
-        score_tab, ranking_tab, optimizer_tab, debug_tab = st.tabs(
-            ["📐 评分与权重", "🌿 完整植物排名", "🧩 优化与映射", "🧰 调试信息"]
+        lane_count = int(
+            (result.get("lane_defense") or {}).get("lanes_count", 5)
+        )
+        score_tab, ranking_tab, optimizer_tab, lane_tab, debug_tab = st.tabs(
+            [
+                "📐 评分与权重",
+                "🌿 完整植物排名",
+                "🧩 优化与映射",
+                f"🛡️ 车道部署（{lane_count} 车道）",
+                "🧰 调试信息",
+            ]
         )
         with score_tab:
             st.markdown(
@@ -903,6 +950,11 @@ def render_technical_details(model: dict[str, Any]) -> None:
                 )
             else:
                 st.success("本轮 15 种植物均已映射菜价。")
+        with lane_tab:
+            st.caption(
+                "车道部署由已选植物数量确定性展开，仅用于查看各车道攻防分布。"
+            )
+            render_lane_defense(result)
         with debug_tab:
             st.caption("用于复核本次提交状态；不包含邮箱、路径或其他个人信息。")
             st.json(

@@ -30,6 +30,10 @@ class DashboardModelTests(unittest.TestCase):
         self.assertTrue(model["result"]["combination"])
         self.assertEqual(len(model["reasons"]), len(model["result"]["combination"]))
         self.assertEqual(model["result"]["score_column"], "apocalypse_index")
+        lane_defense = model["result"]["lane_defense"]
+        self.assertEqual(lane_defense["lanes_count"], 5)
+        self.assertEqual(len(lane_defense["lanes"]), 5)
+        self.assertIn(lane_defense["weakest_lane"], range(1, 6))
         self.assertEqual(model["score_label"], "末日性价比指数")
         self.assertEqual(model["price_unit"], "元/kg")
         comparison = model["candidate_comparison"]

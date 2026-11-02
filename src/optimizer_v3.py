@@ -16,6 +16,15 @@ defense/control plant; then spend the remaining sun on paid plants by
 attacker.  Free plants are reserved for the fill phase so they cannot starve
 the paid plants of the whole sun budget.
 
+Step 2 adds a lane layer on top of the already selected roster.  It never
+changes the selected quantities: it only distributes the same plant instances
+across ``lanes`` lanes (one defense/control seed per lane, then paid attackers
+balanced by current DPS, then the remaining plants, then free attackers to
+fill each lane).  When a partial regional CSV contains too few attack plants
+to physically cover every lane, per-lane attack coverage falls back to
+"vacuously satisfied" so the documented partial-upload flow keeps working
+(the same safe-fallback rule used for a missing producer).
+
 The production quota is enforced whenever the candidate pool contains a
 producer.  A partial regional CSV may map only vegetables without a producer;
 in that case the quota is vacuously satisfied so the existing partial-upload
@@ -24,7 +33,7 @@ flow keeps working (the safe fallback required by the project rules).
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 import pandas as pd
 
@@ -52,12 +61,16 @@ def optimize_planting_v3(
     horizon: int = HORIZON_SECONDS,
     max_plant_share: float = DEFAULT_MAX_PLANT_SHARE,
     sky_sun_per_sec: float = 0.0,
+    lanes: int = 5,
 ) -> dict[str, Any]:
     """Return a deterministic V3 planting combination.
 
     ``available_sun`` is the spendable budget for this round, so the returned
     ``total_sun_cost`` never exceeds it.  Production inside the horizon is
     reported separately in ``sun_economy`` instead of being re-spent.
+
+    ``lanes`` only controls the read-only ``lane_defense`` deployment plan; it
+    never changes the selected plant quantities.
     """
 
     if horizon <= 0:
@@ -65,6 +78,9 @@ def optimize_planting_v3(
     if sky_sun_per_sec < 0:
         raise ValueError("天空阳光速率不能为负数")
     _validate_limits(available_sun, available_cells)
+    if int(lanes) < 1:
+        raise ValueError("车道数必须至少为 1")
+    lanes = int(lanes)
 
     data, score_column = _prepare_plants(ranking, horizon)
     per_plant_limit = calculate_per_plant_limit(
@@ -81,6 +97,7 @@ def optimize_planting_v3(
             per_plant_limit=per_plant_limit,
             score_column=score_column,
             has_producer_candidates=bool(data["_is_producer"].any()),
+            lanes=lanes,
             reason="植物表缺少必需的植物类型：" + "、".join(missing)
             + "。请检查菜价映射或 plants.csv。",
         )
@@ -120,6 +137,7 @@ def optimize_planting_v3(
                 per_plant_limit=per_plant_limit,
                 score_column=score_column,
                 has_producer_candidates=bool(data["_is_producer"].any()),
+                lanes=lanes,
                 reason=(
                     f"当前阳光 ({available_sun}) 或格子 ({available_cells}) "
                     f"不足以先部署 1 株{label}，无法满足 V3 三类经济约束。"
@@ -162,6 +180,7 @@ def optimize_planting_v3(
         max_plant_share=max_plant_share,
         per_plant_limit=per_plant_limit,
         sky_sun_per_sec=sky_sun_per_sec,
+        lanes=lanes,
     )
 
 
@@ -315,6 +334,7 @@ def _build_result(
     max_plant_share: float,
     per_plant_limit: int,
     sky_sun_per_sec: float,
+    lanes: int,
 ) -> dict[str, Any]:
     selected = {index: int(quantity) for index, quantity in counts.items() if quantity > 0}
 
@@ -372,7 +392,30 @@ def _build_result(
     has_production = _has_selected(data, selected, "_is_producer") or not bool(
         data["_is_producer"].any()
     )
-    v3_checks = {**checks, "has_production": has_production}
+    lane_defense = _build_lane_defense(
+        data,
+        selected,
+        lanes=lanes,
+        available_cells=available_cells,
+        horizon=horizon,
+    )
+    # A partial regional CSV may select fewer attack plants than there are
+    # lanes.  In that documented fallback the per-lane attack coverage is
+    # vacuous (mirrors the missing-producer rule) instead of flipping the
+    # whole recommendation to infeasible.
+    attack_instances = sum(
+        int(quantity)
+        for index, quantity in selected.items()
+        if bool(data.at[index, "_is_attack"])
+    )
+    has_attack_per_lane = all(
+        lane["dps"] > 0 for lane in lane_defense["lanes"]
+    ) or attack_instances < lanes
+    v3_checks = {
+        **checks,
+        "has_production": has_production,
+        "has_attack_per_lane": has_attack_per_lane,
+    }
     all_constraints_met = all(v3_checks.values())
 
     unused_cells = max(0, available_cells - total_plants)
@@ -452,6 +495,7 @@ def _build_result(
             f"模拟 {horizon} 秒内预计提供 {total_dps:g} 点/秒攻击、"
             f"{total_wall_hp:g} 点墙血，并产出 {production_over_horizon:g} 阳光。"
         )
+        reason += _lane_reason_suffix(lane_defense)
     else:
         reason = "当前阳光、格子或植物类型不足，无法满足 V3 三类经济约束。"
 
@@ -495,7 +539,218 @@ def _build_result(
             "effective_defense": effective_defense,
             "horizon": horizon,
         },
+        "lane_defense": lane_defense,
     }
+
+
+def _build_lane_defense(
+    data: pd.DataFrame,
+    selected: Mapping[Any, int],
+    *,
+    lanes: int,
+    available_cells: int,
+    horizon: int,
+) -> dict[str, Any]:
+    """Distribute the already selected instances across fixed lanes.
+
+    The plan is deterministic: capacity is ``cells // lanes`` plus one extra
+    cell for the first ``cells % lanes`` lanes.  Assignment order is
+    defense/control seed per lane, paid attackers balanced by current DPS,
+    other remaining plants, then free attackers filling the weakest lanes.
+    """
+
+    base_capacity, remainder = divmod(available_cells, lanes)
+    states = [
+        {
+            "lane": lane_number,
+            "capacity": base_capacity + (1 if lane_number <= remainder else 0),
+            "cells": 0,
+            "dps": 0.0,
+            "defense": 0.0,
+            "plants": {},
+        }
+        for lane_number in range(1, lanes + 1)
+    ]
+    instances = _expand_instances(data, selected)
+    used: set[int] = set()
+
+    # (a) One defense/control seed per lane, strongest first.
+    support_positions = sorted(
+        (
+            position
+            for position, instance in enumerate(instances)
+            if instance["is_support"]
+        ),
+        key=lambda position: (
+            -instances[position]["support_rating"],
+            -instances[position]["dps"],
+            instances[position]["name"],
+        ),
+    )
+    support_cursor = 0
+    for state in states:
+        if support_cursor >= len(support_positions):
+            break
+        if state["cells"] >= state["capacity"]:
+            continue
+        position = support_positions[support_cursor]
+        support_cursor += 1
+        used.add(position)
+        _place_instance(state, instances[position])
+
+    # (b) Paid attackers, strongest first, into the currently weakest lane.
+    for position in _sorted_positions(
+        instances,
+        used,
+        lambda instance: instance["is_attack"] and instance["sun_cost"] > 0,
+    ):
+        state = _weakest_open_lane(states)
+        if state is None:
+            break
+        used.add(position)
+        _place_instance(state, instances[position])
+
+    # (c) Any remaining paid or non-attacking plants not used as a lane seed.
+    for position in _sorted_positions(
+        instances,
+        used,
+        lambda instance: not (
+            instance["is_attack"] and instance["sun_cost"] == 0
+        ),
+    ):
+        state = _weakest_open_lane(states)
+        if state is None:
+            break
+        used.add(position)
+        _place_instance(state, instances[position])
+
+    # (d) Zero-sun attackers fill whatever capacity remains.
+    for position in _sorted_positions(
+        instances,
+        used,
+        lambda instance: instance["is_attack"] and instance["sun_cost"] == 0,
+    ):
+        state = _weakest_open_lane(states)
+        if state is None:
+            break
+        used.add(position)
+        _place_instance(state, instances[position])
+
+    # Safety net: selected quantities must always fit, so place leftovers.
+    for position in sorted(set(range(len(instances))) - used):
+        state = _weakest_open_lane(states)
+        if state is None:
+            break
+        used.add(position)
+        _place_instance(state, instances[position])
+
+    rows = []
+    for state in states:
+        rows.append(
+            {
+                "lane": state["lane"],
+                "capacity": state["capacity"],
+                "cells": state["cells"],
+                "dps": round(state["dps"], 4),
+                "defense": round(state["defense"], 4),
+                "survivability": round(
+                    state["dps"] * horizon + 0.1 * state["defense"], 4
+                ),
+                "plants": dict(sorted(state["plants"].items())),
+            }
+        )
+
+    weakest = min(rows, key=lambda row: (row["survivability"], row["lane"]))
+    return {
+        "lanes": rows,
+        "lanes_count": lanes,
+        "weakest_lane": weakest["lane"],
+        "weakest_survivability": weakest["survivability"],
+    }
+
+
+def _expand_instances(
+    data: pd.DataFrame,
+    selected: Mapping[Any, int],
+) -> list[dict[str, Any]]:
+    instances: list[dict[str, Any]] = []
+    ordered = sorted(
+        selected.items(), key=lambda item: str(data.at[item[0], "name"])
+    )
+    for index, quantity in ordered:
+        row = data.loc[index]
+        for _ in range(int(quantity)):
+            instances.append(
+                {
+                    "name": str(row["name"]),
+                    "sun_cost": float(row["sun_cost"]),
+                    "dps": float(row["_dps"]),
+                    "defense": float(row["_wall"])
+                    + float(row["defense"])
+                    + float(row["control"]),
+                    "support_rating": float(row["_support_rating"]),
+                    "is_attack": bool(row["_is_attack"]),
+                    "is_support": bool(row["_is_support"]),
+                }
+            )
+    return instances
+
+
+def _sorted_positions(
+    instances: list[dict[str, Any]],
+    used: set[int],
+    predicate: Callable[[Mapping[str, Any]], bool],
+) -> list[int]:
+    return sorted(
+        (
+            position
+            for position, instance in enumerate(instances)
+            if position not in used and predicate(instance)
+        ),
+        key=lambda position: (
+            -instances[position]["dps"],
+            instances[position]["name"],
+        ),
+    )
+
+
+def _weakest_open_lane(states: list[dict[str, Any]]) -> dict[str, Any] | None:
+    open_states = [
+        state for state in states if state["cells"] < state["capacity"]
+    ]
+    if not open_states:
+        return None
+    return min(open_states, key=lambda state: (state["dps"], state["lane"]))
+
+
+def _place_instance(
+    state: dict[str, Any],
+    instance: Mapping[str, Any],
+) -> None:
+    state["cells"] += 1
+    state["dps"] += float(instance["dps"])
+    state["defense"] += float(instance["defense"])
+    name = str(instance["name"])
+    state["plants"][name] = state["plants"].get(name, 0) + 1
+
+
+def _lane_reason_suffix(lane_defense: Mapping[str, Any]) -> str:
+    weakest_lane = lane_defense["weakest_lane"]
+    if weakest_lane is None:
+        return ""
+    row = next(
+        lane
+        for lane in lane_defense["lanes"]
+        if lane["lane"] == weakest_lane
+    )
+    return (
+        f"（{lane_defense['lanes_count']} 车道部署：最弱车道 #{weakest_lane}，"
+        f"dps≈{_format_metric(row['dps'])}，防御≈{_format_metric(row['defense'])}）"
+    )
+
+
+def _format_metric(value: float) -> str:
+    return f"{round(float(value), 4):g}"
 
 
 def _has_selected(
@@ -518,6 +773,7 @@ def _infeasible_result(
     per_plant_limit: int,
     score_column: str,
     has_producer_candidates: bool,
+    lanes: int,
     reason: str,
 ) -> dict[str, Any]:
     checks = {
@@ -527,7 +783,11 @@ def _infeasible_result(
         "has_attack": False,
         "has_defense_or_control": False,
     }
-    v3_checks = {**checks, "has_production": not has_producer_candidates}
+    v3_checks = {
+        **checks,
+        "has_production": not has_producer_candidates,
+        "has_attack_per_lane": False,
+    }
     return {
         "strategy": {},
         "combination": [],
@@ -560,5 +820,11 @@ def _infeasible_result(
             "total_wall_hp": 0.0,
             "effective_defense": 0.0,
             "horizon": horizon,
+        },
+        "lane_defense": {
+            "lanes": [],
+            "lanes_count": lanes,
+            "weakest_lane": None,
+            "weakest_survivability": 0,
         },
     }

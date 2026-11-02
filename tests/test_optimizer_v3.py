@@ -117,6 +117,53 @@ class OptimizerV3Tests(unittest.TestCase):
         self.assertGreaterEqual(combat["effective_defense"], combat["total_wall_hp"])
         self.assertEqual(combat["horizon"], 120)
 
+    def test_lane_deployment_keeps_selection_and_covers_five_lanes(self) -> None:
+        result = optimize_planting_v3(
+            self.ranking,
+            available_sun=150,
+            available_cells=20,
+        )
+        lane_defense = result["lane_defense"]
+
+        self.assertEqual(lane_defense["lanes_count"], 5)
+        self.assertEqual(len(lane_defense["lanes"]), 5)
+        self.assertEqual(
+            sum(lane["capacity"] for lane in lane_defense["lanes"]),
+            20,
+        )
+        self.assertEqual(
+            sum(
+                sum(lane["plants"].values())
+                for lane in lane_defense["lanes"]
+            ),
+            result["total_plants"],
+        )
+        self.assertIn(lane_defense["weakest_lane"], range(1, 6))
+        self.assertTrue(result["v3_constraint_checks"]["has_attack_per_lane"])
+        self.assertIn("5 车道部署", result["recommendation_reason"])
+        # The lane layer must not perturb the step-1 selection.
+        self.assertDictEqual(
+            result["strategy"],
+            {"阳光菇": 1, "土豆雷": 4, "灯笼草": 1, "小喷菇": 14},
+        )
+        for lane in lane_defense["lanes"]:
+            with self.subTest(lane=lane["lane"]):
+                self.assertGreater(lane["dps"], 0)
+                self.assertLessEqual(lane["cells"], lane["capacity"])
+                self.assertEqual(
+                    lane["cells"],
+                    sum(lane["plants"].values()),
+                )
+        weakest = next(
+            lane
+            for lane in lane_defense["lanes"]
+            if lane["lane"] == lane_defense["weakest_lane"]
+        )
+        self.assertEqual(
+            lane_defense["weakest_survivability"],
+            weakest["survivability"],
+        )
+
     def test_optimizer_is_deterministic(self) -> None:
         first = optimize_planting_v3(
             self.ranking,
@@ -157,6 +204,11 @@ class OptimizerV3Tests(unittest.TestCase):
         self.assertEqual(result["strategy"], {})
         self.assertFalse(result["combination"])
         self.assertIn("防御/控制植物", result["recommendation_reason"])
+        self.assertEqual(result["lane_defense"]["lanes"], [])
+        self.assertEqual(result["lane_defense"]["lanes_count"], 5)
+        self.assertIsNone(result["lane_defense"]["weakest_lane"])
+        self.assertEqual(result["lane_defense"]["weakest_survivability"], 0)
+        self.assertFalse(result["v3_constraint_checks"]["has_attack_per_lane"])
 
 
 if __name__ == "__main__":
