@@ -8,7 +8,7 @@ import warnings
 
 import pandas as pd
 
-from src.optimizer import optimize_planting
+from src.optimizer_v3 import optimize_planting_v3
 from src.pipeline import DEFAULT_PROCESSED_PATH, load_or_build_processed_prices
 from src.plant_mapping import load_plant_mapping
 from src.preprocess import NORMALIZED_PRICE_UNIT
@@ -107,11 +107,10 @@ def build_dashboard_model(
     weights = apply_weight_multipliers(mode["weight_multipliers"])
     ranking = calculate_apocalypse_scores(plants, prices, weights=weights)
 
-    result = optimize_planting(
+    result = optimize_planting_v3(
         ranking,
         available_sun=available_sun,
         available_cells=available_cells,
-        score_column="apocalypse_index",
     )
     reasons = build_recommendation_reasons(
         result, ranking, zombie_mode=zombie_mode

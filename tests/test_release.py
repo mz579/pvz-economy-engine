@@ -120,7 +120,7 @@ class ReleasePackageTests(unittest.TestCase):
             )
 
             self.assertEqual(completed.returncode, 0, completed.stderr.decode(errors="replace"))
-            self.assertIn(b"Status: Optimal", completed.stdout)
+            self.assertIn(b"Status: Feasible (v3 simulation)", completed.stdout)
             self.assertTrue(processed_output.is_file())
 
 

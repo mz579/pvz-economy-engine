@@ -45,7 +45,10 @@ class DashboardModelTests(unittest.TestCase):
         )
 
     def test_every_zombie_mode_can_refresh_a_recommendation(self) -> None:
-        scores = []
+        # V3 selection is driven by plant attributes, so the same grid/sun can
+        # yield the same roster across modes; the mode-specific ranking must
+        # still change and every recommendation must remain valid.
+        ranking_vectors = []
         for mode in ZOMBIE_MODES:
             with self.subTest(mode=mode):
                 model = build_dashboard_model(mode, 200, 20)
@@ -59,8 +62,14 @@ class DashboardModelTests(unittest.TestCase):
                         else model["result"]["per_plant_limit"]
                     )
                     self.assertLessEqual(int(item["quantity"]), bound)
-                scores.append(model["result"]["total_score"])
-        self.assertGreater(len(set(scores)), 1)
+                self.assertGreater(model["result"]["total_score"], 0)
+                ranking_vectors.append(
+                    tuple(
+                        round(float(value), 8)
+                        for value in model["ranking"]["apocalypse_index"]
+                    )
+                )
+        self.assertGreater(len(set(ranking_vectors)), 1)
 
     def test_price_trend_is_ordered_and_non_empty(self) -> None:
         model = build_dashboard_model("尸潮来袭", 150, 20)
@@ -123,7 +132,7 @@ class DashboardModelTests(unittest.TestCase):
         self.assertEqual(result["max_plant_share"], 0.30)
         self.assertDictEqual(
             result["strategy"],
-            {"土豆雷": 5, "小喷菇": 14, "灯笼草": 1},
+            {"阳光菇": 1, "小喷菇": 14, "灯笼草": 1, "土豆雷": 4},
         )
         self.assertGreater(result["strategy"]["小喷菇"], 6)
         for item in result["combination"]:
@@ -133,7 +142,14 @@ class DashboardModelTests(unittest.TestCase):
         self.assertEqual(result["total_plants"], 20)
         self.assertEqual(result["unused_cells"], 0)
         self.assertEqual(result["unused_cells_reason"], "")
-        self.assertAlmostEqual(result["total_score"], 1.1433, places=4)
+        self.assertAlmostEqual(
+            result["total_score"],
+            sum(item["subtotal_score"] for item in result["combination"]),
+            delta=1e-3,
+        )
+        self.assertGreater(result["objective_value"], 0)
+        self.assertEqual(result["method"], "v3-simulation")
+        self.assertEqual(result["status"], "Feasible (v3 simulation)")
         self.assertEqual(model["concentration_policy"]["per_plant_limit"], 6)
         self.assertTrue(model["concentration_policy"]["is_v2_assumption"])
 

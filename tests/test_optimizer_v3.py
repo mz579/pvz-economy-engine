@@ -1,0 +1,163 @@
+"""Tests for the V3 step-1 sun economy + combat optimizer."""
+
+from __future__ import annotations
+
+from pathlib import Path
+import sys
+import unittest
+
+import pandas as pd
+
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from src.dashboard import load_offline_prices
+from src.optimizer_v3 import optimize_planting_v3
+from src.plant_mapping import load_plant_mapping
+from src.scoring import calculate_apocalypse_scores
+
+
+class OptimizerV3Tests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.plants = load_plant_mapping()
+        cls.ranking = calculate_apocalypse_scores(
+            cls.plants,
+            load_offline_prices(),
+        )
+        cls.indexed = cls.plants.set_index("name")
+
+    def selected_names(self, result: dict) -> set[str]:
+        return {
+            name for name, quantity in result["strategy"].items() if quantity > 0
+        }
+
+    def test_real_150_sun_20_cells_respects_all_constraints(self) -> None:
+        result = optimize_planting_v3(
+            self.ranking,
+            available_sun=150,
+            available_cells=20,
+        )
+
+        self.assertTrue(result["all_constraints_met"])
+        self.assertTrue(all(result["constraint_checks"].values()))
+        self.assertTrue(result["v3_constraint_checks"]["has_production"])
+        self.assertLessEqual(result["total_sun_cost"], 150)
+        self.assertLessEqual(result["total_plants"], 20)
+        self.assertEqual(result["total_plants"], 20)
+        self.assertEqual(result["unused_cells"], 0)
+        self.assertEqual(result["unused_cells_reason"], "")
+        self.assertEqual(result["method"], "v3-simulation")
+        self.assertEqual(result["score_column"], "apocalypse_index")
+
+        selected = self.selected_names(result)
+        producers = set(self.indexed.index[self.indexed["production"] > 0])
+        attackers = set(self.indexed.index[self.indexed["category"] == "攻击"])
+        supporters = set(
+            self.indexed.index[
+                self.indexed["category"].eq("防御")
+                | self.indexed["role"].str.contains("防御|控制", regex=True)
+                | self.indexed["defense"].ge(5)
+                | self.indexed["control"].ge(5)
+            ]
+        )
+
+        self.assertTrue(selected & producers, "组合必须包含至少 1 个产能植物")
+        self.assertTrue(selected & attackers, "组合必须包含至少 1 个攻击植物")
+        self.assertTrue(selected & supporters, "组合必须包含至少 1 个防御/控制植物")
+        self.assertIn("阳光菇", selected)
+
+        # 0 阳光植物不受付费植物的集中度上限约束。
+        self.assertGreater(result["strategy"]["小喷菇"], result["per_plant_limit"])
+        for item in result["combination"]:
+            bound = (
+                20
+                if float(item["unit_sun_cost"]) == 0
+                else result["per_plant_limit"]
+            )
+            with self.subTest(plant=item["name"]):
+                self.assertLessEqual(int(item["quantity"]), bound)
+
+    def test_sun_economy_and_combat_fields_are_complete(self) -> None:
+        result = optimize_planting_v3(
+            self.ranking,
+            available_sun=150,
+            available_cells=20,
+        )
+        economy = result["sun_economy"]
+        combat = result["combat"]
+
+        self.assertEqual(
+            set(economy),
+            {
+                "start_sun",
+                "initial_cost",
+                "production_over_horizon",
+                "ending_sun",
+                "payback_seconds",
+                "horizon",
+            },
+        )
+        self.assertEqual(economy["start_sun"], 150)
+        self.assertEqual(economy["initial_cost"], result["total_sun_cost"])
+        self.assertEqual(economy["horizon"], 120)
+        self.assertGreater(economy["production_over_horizon"], 0)
+        self.assertGreaterEqual(economy["ending_sun"], 0)
+        self.assertAlmostEqual(economy["payback_seconds"]["阳光菇"], 30.0, places=2)
+
+        self.assertEqual(
+            set(combat),
+            {"total_dps", "total_wall_hp", "effective_defense", "horizon"},
+        )
+        self.assertGreaterEqual(combat["total_dps"], 0)
+        self.assertGreater(combat["total_dps"], 0)
+        self.assertGreater(combat["total_wall_hp"], 0)
+        self.assertGreaterEqual(combat["effective_defense"], combat["total_wall_hp"])
+        self.assertEqual(combat["horizon"], 120)
+
+    def test_optimizer_is_deterministic(self) -> None:
+        first = optimize_planting_v3(
+            self.ranking,
+            available_sun=150,
+            available_cells=20,
+        )
+        second = optimize_planting_v3(
+            self.ranking,
+            available_sun=150,
+            available_cells=20,
+        )
+        self.assertEqual(first, second)
+
+    def test_infeasible_pool_returns_empty_constraint_checked_result(self) -> None:
+        attack_only = pd.DataFrame(
+            [
+                {
+                    "name": "豌豆射手",
+                    "sun_cost": 100,
+                    "attack": 20,
+                    "defense": 3,
+                    "production": 0,
+                    "control": 0,
+                    "special_tag": "SINGLE",
+                    "role": "远程输出",
+                    "category": "攻击",
+                    "hp": 100,
+                    "apocalypse_index": 0.1,
+                }
+            ]
+        )
+        result = optimize_planting_v3(
+            attack_only,
+            available_sun=150,
+            available_cells=20,
+        )
+        self.assertFalse(result["all_constraints_met"])
+        self.assertEqual(result["strategy"], {})
+        self.assertFalse(result["combination"])
+        self.assertIn("防御/控制植物", result["recommendation_reason"])
+
+
+if __name__ == "__main__":
+    unittest.main()
