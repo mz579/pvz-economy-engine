@@ -32,3 +32,19 @@ CREATE TABLE IF NOT EXISTS strategy_result (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (run_id, date_id)
 );
+
+CREATE TABLE IF NOT EXISTS pipeline_run (
+    run_id      TEXT NOT NULL PRIMARY KEY,
+    stage       TEXT NOT NULL,
+    started_at  TIMESTAMP,
+    finished_at TIMESTAMP,
+    rows_in     INTEGER,
+    rows_out    INTEGER,
+    status      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS etl_watermark (
+    pipeline     TEXT NOT NULL PRIMARY KEY,
+    last_date_id DATE,
+    updated_at   TIMESTAMP
+);

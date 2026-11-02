@@ -7,6 +7,7 @@ import json
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 import pandas as pd
 
@@ -19,6 +20,7 @@ from src.crawler import (
 from src.features import add_price_features
 from src.preprocess import NORMALIZED_PRICE_UNIT, clean_price_data
 from src.runtime import runtime_path
+from src.storage.load import PRICE_PIPELINE, load_prices, record_run
 
 
 DEFAULT_RAW_PATH = runtime_path("data/raw/latest_prices.csv")
@@ -45,6 +47,8 @@ def run_data_pipeline(
     metadata_path: Path | str = DEFAULT_METADATA_PATH,
     history_window: int = 30,
     timeout: float = 8.0,
+    load_db: bool = False,
+    db_path: Path | str | None = None,
 ) -> PipelineArtifacts:
     """Run the complete, offline-safe data preparation pipeline."""
 
@@ -109,6 +113,38 @@ def run_data_pipeline(
     metadata_target.write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+
+    if load_db:
+        run_id = uuid4().hex
+        started_at = datetime.now(timezone.utc)
+        try:
+            stats = load_prices(featured, db_path=db_path, run_id=run_id)
+            record_run(
+                run_id,
+                PRICE_PIPELINE,
+                "success",
+                rows_in=int(len(featured)),
+                rows_out=int(stats["prices_upserted"]),
+                started_at=started_at,
+                finished_at=datetime.now(timezone.utc),
+                db_path=db_path,
+            )
+        except Exception:
+            try:
+                record_run(
+                    run_id,
+                    PRICE_PIPELINE,
+                    "failed",
+                    rows_in=int(len(featured)),
+                    started_at=started_at,
+                    finished_at=datetime.now(timezone.utc),
+                    db_path=db_path,
+                )
+            except Exception:
+                # Never mask the original database failure.
+                pass
+            raise
+
     return PipelineArtifacts(
         data=featured,
         raw_path=raw_target,
@@ -159,6 +195,11 @@ def _build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--online", action="store_true", help="优先尝试新发地公开数据")
     mode.add_argument("--offline", action="store_true", help="仅使用本地 CSV fallback")
     parser.add_argument("--output", type=Path, default=DEFAULT_PROCESSED_PATH)
+    parser.add_argument(
+        "--load-db",
+        action="store_true",
+        help="将结果落库到 SQLite（默认关闭）",
+    )
     return parser
 
 
@@ -167,6 +208,7 @@ def main() -> int:
     artifacts = run_data_pipeline(
         prefer_network=bool(args.online and not args.offline),
         processed_path=args.output,
+        load_db=args.load_db,
     )
     print(artifacts.collection.message)
     print(

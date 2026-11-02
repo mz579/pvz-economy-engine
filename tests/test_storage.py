@@ -16,7 +16,14 @@ if str(ROOT) not in sys.path:
 from src.storage import get_conn, init_db
 
 
-EXPECTED_TABLES = {"dim_date", "dim_commodity", "fact_price", "strategy_result"}
+EXPECTED_TABLES = {
+    "dim_date",
+    "dim_commodity",
+    "fact_price",
+    "strategy_result",
+    "pipeline_run",
+    "etl_watermark",
+}
 
 
 class StorageTests(unittest.TestCase):
@@ -40,7 +47,7 @@ class StorageTests(unittest.TestCase):
             conn.close()
         return {row[0] for row in rows}
 
-    def test_init_db_creates_four_tables(self) -> None:
+    def test_init_db_creates_expected_tables(self) -> None:
         created = init_db(self.db_path)
 
         self.assertEqual(created, self.db_path.resolve())
