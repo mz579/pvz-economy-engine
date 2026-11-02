@@ -36,3 +36,6 @@ data/beijing/
 
 # Personal documents.
 *.docx
+
+# 本地临时目录
+.tmp/
