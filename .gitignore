@@ -25,6 +25,12 @@ data/processed/*
 !data/processed/README.md
 data/custom/
 
+# Generated SQLite storage.
+data/pvz.db
+data/pvz.db-journal
+data/pvz.db-wal
+data/pvz.db-shm
+
 # Legacy cache path kept out of version control during migration.
 data/beijing/
 

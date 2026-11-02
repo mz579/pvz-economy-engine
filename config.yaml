@@ -1,0 +1,4 @@
+# V2.0 runtime configuration.
+# Relative paths are resolved against the project root, never the current cwd.
+db:
+  path: data/pvz.db
