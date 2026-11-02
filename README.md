@@ -130,6 +130,23 @@ python cli.py --online --mode "尸潮来袭" --sun 200 --cells 25
 
 `src/features.py` 按蔬菜和日期计算 7/14/30 日均价、30 日历史均价、涨跌幅、价格分位和波动率。`data/raw/` 与 `data/processed/` 中的运行产物已由 `.gitignore` 排除，确保它们只能由流水线生成。
 
+## 数据存储层（P0）
+
+清洗后的菜价以幂等方式写入本地 SQLite，路径由 `config.yaml` 的 `db.path` 指定（默认 `data/pvz.db`，已加入 `.gitignore`，生成库不提交）。
+
+核心维度/事实表 4 张：`dim_date`、`dim_commodity`、`fact_price`、`strategy_result`；另有 `pipeline_run`、`etl_watermark`、`dq_result` 三张审计表，记录每次运行、最新水位和数据质量结果。
+
+- **幂等 upsert**：同一 `date_id + commodity_id` 重复写入只更新价格，不会产生重复行；`pipeline_run` 按 `run_id` 更新。
+- **DQ 校验阻断**：落库前先执行 R1-R7。阻断规则失败时只写入 `dq_result` 审计记录并把运行标记为 `failed`，不写入任何价格。
+- **验收查询**：`sql/acceptance_recent_7d_avg.sql` 取某品类 `date_id <= as_of` 的最近 N 个交易日（N 默认 7），输出 `name`、`avg_price`、`days`。
+
+```bash
+python -m src.storage.init_db                  # 建库建表
+python -m src.pipeline --offline --load-db     # 离线跑通全链路并落库
+python -m src.dq --csv data/processed/vegetable_prices.csv
+python -m src.storage.query --name 土豆 --days 7
+```
+
 ## 植物映射
 
 `data/plants.csv` 包含 15 种植物。核心字段为植物名、映射蔬菜、阳光成本、攻击、防御、产能、控制、特殊能力和定位；`special_tag` 与 `category` 分别用于特殊能力量化和优化器角色识别。
