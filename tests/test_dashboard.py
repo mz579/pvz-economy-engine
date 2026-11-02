@@ -34,6 +34,8 @@ class DashboardModelTests(unittest.TestCase):
         self.assertEqual(lane_defense["lanes_count"], 5)
         self.assertEqual(len(lane_defense["lanes"]), 5)
         self.assertIn(lane_defense["weakest_lane"], range(1, 6))
+        self.assertEqual(model["scenario"], "day")
+        self.assertEqual(model["result"]["scenario"], "day")
         self.assertEqual(model["score_label"], "末日性价比指数")
         self.assertEqual(model["price_unit"], "元/kg")
         comparison = model["candidate_comparison"]
@@ -134,18 +136,20 @@ class DashboardModelTests(unittest.TestCase):
 
         self.assertEqual(result["per_plant_limit"], 6)
         self.assertEqual(result["max_plant_share"], 0.30)
+        # Default day scenario: mushrooms sleep, so the roster contains only
+        # awaken plants; there is no free attacker to fill the unused cells.
         self.assertDictEqual(
             result["strategy"],
-            {"阳光菇": 1, "小喷菇": 14, "灯笼草": 1, "土豆雷": 4},
+            {"向日葵": 1, "土豆雷": 3, "灯笼草": 1},
         )
-        self.assertGreater(result["strategy"]["小喷菇"], 6)
+        self.assertFalse(set(result["strategy"]) & {"小喷菇", "阳光菇", "大喷菇"})
         for item in result["combination"]:
             bound = 20 if float(item["unit_sun_cost"]) == 0 else 6
             self.assertLessEqual(int(item["quantity"]), bound)
         self.assertEqual(result["total_sun_cost"], 150)
-        self.assertEqual(result["total_plants"], 20)
-        self.assertEqual(result["unused_cells"], 0)
-        self.assertEqual(result["unused_cells_reason"], "")
+        self.assertEqual(result["total_plants"], 5)
+        self.assertEqual(result["unused_cells"], 15)
+        self.assertIn("0 阳光攻击植物", result["unused_cells_reason"])
         self.assertAlmostEqual(
             result["total_score"],
             sum(item["subtotal_score"] for item in result["combination"]),
@@ -156,6 +160,25 @@ class DashboardModelTests(unittest.TestCase):
         self.assertEqual(result["status"], "Feasible (v3 simulation)")
         self.assertEqual(model["concentration_policy"]["per_plant_limit"], 6)
         self.assertTrue(model["concentration_policy"]["is_v2_assumption"])
+
+    def test_night_scenario_allows_mushrooms_and_removes_sky_sun(self) -> None:
+        model = build_dashboard_model(
+            "均衡巡逻",
+            150,
+            20,
+            scenario="night",
+        )
+        result = model["result"]
+
+        self.assertEqual(model["scenario"], "night")
+        self.assertEqual(result["scenario"], "night")
+        selected = set(result["strategy"])
+        self.assertTrue(selected & {"小喷菇", "阳光菇", "大喷菇"})
+        self.assertGreater(result["strategy"]["小喷菇"], 6)
+        self.assertEqual(result["total_plants"], 20)
+        self.assertEqual(result["unused_cells"], 0)
+        self.assertEqual(result["sun_economy"]["sky_sun_per_sec"], 0.0)
+        self.assertEqual(result["sun_economy"]["sky_sun_over_horizon"], 0.0)
 
     def test_chart_state_handles_empty_single_constant_and_regular_data(self) -> None:
         from app import chart_data_state
@@ -195,6 +218,7 @@ class StreamlitAppTests(unittest.TestCase):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         required_labels = (
             "僵尸模式",
+            "场景",
             "本轮建议种植",
             "全部候选植物对比",
             "价格与评分",
@@ -255,6 +279,7 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertIn("analysis_model", app.session_state)
         self.assertEqual(app.session_state["analysis_params"]["available_sun"], 150)
         self.assertEqual(app.session_state["analysis_params"]["available_cells"], 20)
+        self.assertEqual(app.session_state["analysis_params"]["scenario"], "day")
         self.assertFalse(app.session_state["analysis_params"]["uses_uploaded_csv"])
         html = self.rendered_html(app)
         self.assertIn("terminal-header", html)
@@ -271,7 +296,11 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertIn("相对比较指数", html)
         self.assertIn("每种植物最多占草坪容量的 30%，本轮最多 6 株", html)
         self.assertIn("未使用位置会保留为空格，不表示错误或不可行", html)
-        self.assertNotIn("本轮保留", html)
+        # Default day scenario has no free mushroom filler, so 15 cells stay
+        # empty and the summary states that explicitly.
+        self.assertIn("本轮保留 15 个空格", html)
+        self.assertIn("当前场景", html)
+        self.assertIn("☀️ 白天", html)
         self.assertIn("reason-points", html)
         self.assertIn("当前价格", html)
         self.assertIn("为什么入选", html)

@@ -72,10 +72,13 @@ def build_dashboard_model(
     *,
     processed_path: Path | str = DEFAULT_PROCESSED_PATH,
     price_data: pd.DataFrame | None = None,
+    scenario: str = "day",
 ) -> dict[str, Any]:
     """Build the Streamlit model from either processed_path or price_data.
 
-    When price_data is provided, processed_path is ignored.
+    When price_data is provided, processed_path is ignored.  ``scenario`` is
+    forwarded to the V3 optimizer so the day/night candidate pool and sky sun
+    stay consistent with the UI.
     """
 
     if price_data is not None and processed_path != DEFAULT_PROCESSED_PATH:
@@ -111,6 +114,7 @@ def build_dashboard_model(
         ranking,
         available_sun=available_sun,
         available_cells=available_cells,
+        scenario=scenario,
     )
     reasons = build_recommendation_reasons(
         result, ranking, zombie_mode=zombie_mode
@@ -143,6 +147,7 @@ def build_dashboard_model(
 
     return {
         "zombie_mode": zombie_mode,
+        "scenario": scenario,
         "mode": mode,
         "weights": weights,
         "plants": plants,

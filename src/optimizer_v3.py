@@ -52,6 +52,14 @@ BURST_TAGS = frozenset({"BOMB", "AOE"})
 LANE_COVERAGE_BY_TAG = {"MULTI": 3, "AOE": 2}
 SCORE_COLUMN_CANDIDATES = ("apocalypse_index", "score")
 
+# Day/night scenario rules (StrategyWiki mechanics): mushrooms sleep during the
+# day, while sky sun only falls during the day.
+SCENARIOS = ("day", "night")
+MUSHROOM_NAMES = ("小喷菇", "阳光菇", "大喷菇")
+MUSHROOMS = frozenset(MUSHROOM_NAMES)
+DEFAULT_SKY_SUN_PER_SEC = {"day": 0.25, "night": 0.0}
+SCENARIO_LABELS = {"day": "白天", "night": "夜间"}
+
 
 def optimize_planting_v3(
     ranking: pd.DataFrame,
@@ -60,8 +68,9 @@ def optimize_planting_v3(
     available_cells: int = 20,
     horizon: int = HORIZON_SECONDS,
     max_plant_share: float = DEFAULT_MAX_PLANT_SHARE,
-    sky_sun_per_sec: float = 0.0,
+    sky_sun_per_sec: float | None = None,
     lanes: int = 5,
+    scenario: str = "day",
 ) -> dict[str, Any]:
     """Return a deterministic V3 planting combination.
 
@@ -71,10 +80,20 @@ def optimize_planting_v3(
 
     ``lanes`` only controls the read-only ``lane_defense`` deployment plan; it
     never changes the selected plant quantities.
+
+    ``scenario`` selects the day/night mechanics: mushrooms are excluded from
+    the candidate pool during the day, and sky sun falls at 0.25/sec by day
+    versus 0/sec at night.  Passing ``sky_sun_per_sec`` explicitly overrides
+    the scenario default.
     """
 
     if horizon <= 0:
         raise ValueError("模拟时长必须大于 0")
+    if scenario not in DEFAULT_SKY_SUN_PER_SEC:
+        raise ValueError("场景必须是 day 或 night")
+    if sky_sun_per_sec is None:
+        sky_sun_per_sec = DEFAULT_SKY_SUN_PER_SEC[scenario]
+    sky_sun_per_sec = float(sky_sun_per_sec)
     if sky_sun_per_sec < 0:
         raise ValueError("天空阳光速率不能为负数")
     _validate_limits(available_sun, available_cells)
@@ -83,6 +102,11 @@ def optimize_planting_v3(
     lanes = int(lanes)
 
     data, score_column = _prepare_plants(ranking, horizon)
+    if scenario == "day":
+        # Mushrooms sleep during the day and cannot be planted.
+        data = data.loc[
+            ~data["name"].astype(str).isin(MUSHROOMS)
+        ].reset_index(drop=True)
     per_plant_limit = calculate_per_plant_limit(
         available_cells, max_plant_share
     )
@@ -98,6 +122,8 @@ def optimize_planting_v3(
             score_column=score_column,
             has_producer_candidates=bool(data["_is_producer"].any()),
             lanes=lanes,
+            scenario=scenario,
+            sky_sun_per_sec=sky_sun_per_sec,
             reason="植物表缺少必需的植物类型：" + "、".join(missing)
             + "。请检查菜价映射或 plants.csv。",
         )
@@ -138,6 +164,8 @@ def optimize_planting_v3(
                 score_column=score_column,
                 has_producer_candidates=bool(data["_is_producer"].any()),
                 lanes=lanes,
+                scenario=scenario,
+                sky_sun_per_sec=sky_sun_per_sec,
                 reason=(
                     f"当前阳光 ({available_sun}) 或格子 ({available_cells}) "
                     f"不足以先部署 1 株{label}，无法满足 V3 三类经济约束。"
@@ -181,6 +209,7 @@ def optimize_planting_v3(
         per_plant_limit=per_plant_limit,
         sky_sun_per_sec=sky_sun_per_sec,
         lanes=lanes,
+        scenario=scenario,
     )
 
 
@@ -189,6 +218,18 @@ def _validate_limits(available_sun: int, available_cells: int) -> None:
         raise ValueError("可用阳光不能为负数")
     if available_cells < 1:
         raise ValueError("格子数必须至少为 1")
+
+
+def _scenario_note(scenario: str, sky_sun_per_sec: float) -> str:
+    """Return the short day/night sentence shared by every result path."""
+
+    label = SCENARIO_LABELS[scenario]
+    if scenario == "day":
+        return (
+            f"{label}：蘑菇（{'、'.join(MUSHROOM_NAMES)}）休眠不可用，"
+            f"天降阳光 {sky_sun_per_sec:g}/秒。"
+        )
+    return f"{label}：蘑菇可用，天降阳光 {sky_sun_per_sec:g}/秒。"
 
 
 def _prepare_plants(
@@ -335,6 +376,7 @@ def _build_result(
     per_plant_limit: int,
     sky_sun_per_sec: float,
     lanes: int,
+    scenario: str,
 ) -> dict[str, Any]:
     selected = {index: int(quantity) for index, quantity in counts.items() if quantity > 0}
 
@@ -484,12 +526,14 @@ def _build_result(
         4,
     )
 
+    scenario_note = _scenario_note(scenario, sky_sun_per_sec)
     if combination:
         selected_text = "、".join(
             f"{item['name']}×{item['quantity']}" for item in combination
         )
         reason = (
-            f"在 {available_sun} 阳光和 {available_cells} 个格子内选择 {selected_text}，"
+            scenario_note
+            + f"在 {available_sun} 阳光和 {available_cells} 个格子内选择 {selected_text}，"
             f"V3 模拟价值 {round(total_value, 4):.2f}；"
             "攻击、防御/控制与阳光产能约束均已满足。"
             f"模拟 {horizon} 秒内预计提供 {total_dps:g} 点/秒攻击、"
@@ -497,7 +541,10 @@ def _build_result(
         )
         reason += _lane_reason_suffix(lane_defense)
     else:
-        reason = "当前阳光、格子或植物类型不足，无法满足 V3 三类经济约束。"
+        reason = (
+            scenario_note
+            + "当前阳光、格子或植物类型不足，无法满足 V3 三类经济约束。"
+        )
 
     return {
         "strategy": {
@@ -520,6 +567,7 @@ def _build_result(
             else "Infeasible (v3 simulation)"
         ),
         "method": "v3-simulation",
+        "scenario": scenario,
         "score_column": score_column,
         "constraint_checks": checks,
         "v3_constraint_checks": v3_checks,
@@ -529,6 +577,8 @@ def _build_result(
             "start_sun": available_sun,
             "initial_cost": _display_number(total_sun),
             "production_over_horizon": production_over_horizon,
+            "sky_sun_per_sec": sky_sun_per_sec,
+            "sky_sun_over_horizon": sky_sun_over_horizon,
             "ending_sun": ending_sun,
             "payback_seconds": payback_seconds,
             "horizon": horizon,
@@ -774,6 +824,8 @@ def _infeasible_result(
     score_column: str,
     has_producer_candidates: bool,
     lanes: int,
+    scenario: str,
+    sky_sun_per_sec: float,
     reason: str,
 ) -> dict[str, Any]:
     checks = {
@@ -802,16 +854,23 @@ def _infeasible_result(
         "unused_cells_reason": "",
         "status": "Infeasible (v3 simulation)",
         "method": "v3-simulation",
+        "scenario": scenario,
         "score_column": score_column,
         "constraint_checks": checks,
         "v3_constraint_checks": v3_checks,
-        "recommendation_reason": reason,
+        "recommendation_reason": _scenario_note(
+            scenario, sky_sun_per_sec
+        ) + reason,
         "fallback_reason": "",
         "sun_economy": {
             "start_sun": available_sun,
             "initial_cost": 0,
             "production_over_horizon": 0.0,
-            "ending_sun": available_sun,
+            "sky_sun_per_sec": sky_sun_per_sec,
+            "sky_sun_over_horizon": round(sky_sun_per_sec * horizon, 4),
+            "ending_sun": round(
+                available_sun + sky_sun_per_sec * horizon, 4
+            ),
             "payback_seconds": {},
             "horizon": horizon,
         },

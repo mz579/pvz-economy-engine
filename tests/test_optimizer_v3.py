@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.dashboard import load_offline_prices
-from src.optimizer_v3 import optimize_planting_v3
+from src.optimizer_v3 import MUSHROOMS, optimize_planting_v3
 from src.plant_mapping import load_plant_mapping
 from src.scoring import calculate_apocalypse_scores
 
@@ -39,6 +39,7 @@ class OptimizerV3Tests(unittest.TestCase):
             self.ranking,
             available_sun=150,
             available_cells=20,
+            scenario="night",
         )
 
         self.assertTrue(result["all_constraints_met"])
@@ -85,6 +86,7 @@ class OptimizerV3Tests(unittest.TestCase):
             self.ranking,
             available_sun=150,
             available_cells=20,
+            scenario="night",
         )
         economy = result["sun_economy"]
         combat = result["combat"]
@@ -95,6 +97,8 @@ class OptimizerV3Tests(unittest.TestCase):
                 "start_sun",
                 "initial_cost",
                 "production_over_horizon",
+                "sky_sun_per_sec",
+                "sky_sun_over_horizon",
                 "ending_sun",
                 "payback_seconds",
                 "horizon",
@@ -105,6 +109,17 @@ class OptimizerV3Tests(unittest.TestCase):
         self.assertEqual(economy["horizon"], 120)
         self.assertGreater(economy["production_over_horizon"], 0)
         self.assertGreaterEqual(economy["ending_sun"], 0)
+        self.assertEqual(economy["sky_sun_per_sec"], 0.0)
+        self.assertEqual(economy["sky_sun_over_horizon"], 0.0)
+        self.assertEqual(
+            economy["ending_sun"],
+            round(
+                economy["start_sun"]
+                - economy["initial_cost"]
+                + economy["production_over_horizon"],
+                4,
+            ),
+        )
         self.assertAlmostEqual(economy["payback_seconds"]["阳光菇"], 30.0, places=2)
 
         self.assertEqual(
@@ -122,6 +137,7 @@ class OptimizerV3Tests(unittest.TestCase):
             self.ranking,
             available_sun=150,
             available_cells=20,
+            scenario="night",
         )
         lane_defense = result["lane_defense"]
 
@@ -176,6 +192,91 @@ class OptimizerV3Tests(unittest.TestCase):
             available_cells=20,
         )
         self.assertEqual(first, second)
+
+    def test_night_scenario_keeps_mushrooms_and_no_sky_sun(self) -> None:
+        result = optimize_planting_v3(
+            self.ranking,
+            available_sun=150,
+            available_cells=20,
+            scenario="night",
+        )
+
+        self.assertEqual(result["scenario"], "night")
+        self.assertTrue(result["all_constraints_met"])
+        selected = self.selected_names(result)
+        self.assertTrue(selected & MUSHROOMS, "夜间应允许蘑菇入选")
+        self.assertIn("小喷菇", selected)
+        # The free mushroom attacker can fill more than the paid-plant cap.
+        self.assertGreater(result["strategy"]["小喷菇"], result["per_plant_limit"])
+        self.assertGreater(result["strategy"]["小喷菇"], 6)
+        self.assertEqual(result["total_plants"], 20)
+
+        economy = result["sun_economy"]
+        self.assertEqual(economy["sky_sun_per_sec"], 0.0)
+        self.assertEqual(economy["sky_sun_over_horizon"], 0.0)
+        self.assertEqual(
+            economy["ending_sun"],
+            round(
+                economy["start_sun"]
+                - economy["initial_cost"]
+                + economy["production_over_horizon"],
+                4,
+            ),
+        )
+        self.assertIn("夜间", result["recommendation_reason"])
+        self.assertIn("蘑菇可用", result["recommendation_reason"])
+
+    def test_day_scenario_excludes_mushrooms_and_adds_sky_sun(self) -> None:
+        result = optimize_planting_v3(
+            self.ranking,
+            available_sun=150,
+            available_cells=20,
+            scenario="day",
+        )
+
+        self.assertEqual(result["scenario"], "day")
+        self.assertTrue(result["all_constraints_met"])
+        selected = self.selected_names(result)
+        self.assertFalse(selected & MUSHROOMS, "白天蘑菇休眠，不应入选")
+        for mushroom in ("小喷菇", "阳光菇", "大喷菇"):
+            self.assertNotIn(mushroom, result["strategy"])
+
+        economy = result["sun_economy"]
+        self.assertEqual(economy["sky_sun_per_sec"], 0.25)
+        self.assertEqual(economy["sky_sun_over_horizon"], 30.0)
+        self.assertEqual(
+            economy["ending_sun"],
+            round(
+                economy["start_sun"]
+                - economy["initial_cost"]
+                + economy["production_over_horizon"]
+                + economy["sky_sun_over_horizon"],
+                4,
+            ),
+        )
+        self.assertIn("白天", result["recommendation_reason"])
+        self.assertIn("蘑菇", result["recommendation_reason"])
+        self.assertIn("天降阳光", result["recommendation_reason"])
+
+    def test_explicit_sky_sun_overrides_scenario_default(self) -> None:
+        result = optimize_planting_v3(
+            self.ranking,
+            available_sun=150,
+            available_cells=20,
+            scenario="day",
+            sky_sun_per_sec=0.0,
+        )
+        self.assertEqual(result["sun_economy"]["sky_sun_per_sec"], 0.0)
+        self.assertEqual(result["sun_economy"]["sky_sun_over_horizon"], 0.0)
+
+    def test_invalid_scenario_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "day 或 night"):
+            optimize_planting_v3(
+                self.ranking,
+                available_sun=150,
+                available_cells=20,
+                scenario="dusk",
+            )
 
     def test_infeasible_pool_returns_empty_constraint_checked_result(self) -> None:
         attack_only = pd.DataFrame(
