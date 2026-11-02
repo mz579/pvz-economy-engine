@@ -170,6 +170,78 @@ def load_prices(
     }
 
 
+def record_dq(
+    run_id: str,
+    records: list[dict[str, str]],
+    *,
+    conn: sqlite3.Connection | None = None,
+    db_path: str | Path | None = None,
+) -> int:
+    """Write one batch of DQ rule records and return the inserted row count.
+
+    ``records`` is the ``DQResult.records`` list, so each mapping must provide
+    ``rule``, ``status`` and ``severity``; ``detail`` is optional.
+    """
+
+    rows = [
+        (
+            str(run_id),
+            str(record["rule"]),
+            str(record["status"]),
+            str(record["severity"]),
+            record.get("detail"),
+        )
+        for record in records
+    ]
+
+    connection, owned = _open_connection(conn, db_path)
+    try:
+        connection.executemany(
+            "INSERT INTO dq_result (run_id, rule, status, severity, detail) "
+            "VALUES (?, ?, ?, ?, ?)",
+            rows,
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        if owned:
+            connection.close()
+    return len(rows)
+
+
+def latest_successful_row_count(
+    *,
+    conn: sqlite3.Connection | None = None,
+    db_path: str | Path | None = None,
+) -> int | None:
+    """Return ``rows_in`` of the latest successful price batch, if any.
+
+    Used by R7 (batch row-count swing). ``None`` means there is no history, so
+    the rule must not fire. ``rows_out`` is used as a fallback when an older
+    record has no ``rows_in``.
+    """
+
+    connection, owned = _open_connection(conn, db_path)
+    try:
+        row = connection.execute(
+            "SELECT rows_in, rows_out FROM pipeline_run "
+            "WHERE stage = ? AND status = 'success' "
+            "ORDER BY COALESCE(finished_at, started_at) DESC, rowid DESC "
+            "LIMIT 1",
+            (PRICE_PIPELINE,),
+        ).fetchone()
+    finally:
+        if owned:
+            connection.close()
+
+    if row is None:
+        return None
+    value = row[0] if row[0] is not None else row[1]
+    return None if value is None else int(value)
+
+
 def record_run(
     run_id: str,
     stage: str,

@@ -17,10 +17,17 @@ from src.crawler import (
     collect_price_data,
     load_local_fallback,
 )
+from src.dq import DQError, validate
 from src.features import add_price_features
 from src.preprocess import NORMALIZED_PRICE_UNIT, clean_price_data
 from src.runtime import runtime_path
-from src.storage.load import PRICE_PIPELINE, load_prices, record_run
+from src.storage.load import (
+    PRICE_PIPELINE,
+    latest_successful_row_count,
+    load_prices,
+    record_dq,
+    record_run,
+)
 
 
 DEFAULT_RAW_PATH = runtime_path("data/raw/latest_prices.csv")
@@ -118,6 +125,14 @@ def run_data_pipeline(
         run_id = uuid4().hex
         started_at = datetime.now(timezone.utc)
         try:
+            previous_rows = latest_successful_row_count(db_path=db_path)
+            dq_result = validate(featured, prev_row_count=previous_rows)
+            # Persist every rule result before deciding whether to load; a
+            # blocking failure must leave an audit trail but write no prices.
+            record_dq(run_id, dq_result.records, db_path=db_path)
+            if not dq_result.passed:
+                raise DQError(dq_result)
+
             stats = load_prices(featured, db_path=db_path, run_id=run_id)
             record_run(
                 run_id,

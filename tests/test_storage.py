@@ -23,6 +23,7 @@ EXPECTED_TABLES = {
     "strategy_result",
     "pipeline_run",
     "etl_watermark",
+    "dq_result",
 }
 
 

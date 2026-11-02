@@ -48,3 +48,13 @@ CREATE TABLE IF NOT EXISTS etl_watermark (
     last_date_id DATE,
     updated_at   TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS dq_result (
+    id         INTEGER PRIMARY KEY,
+    run_id     TEXT,
+    rule       TEXT NOT NULL,
+    status     TEXT NOT NULL,
+    severity   TEXT NOT NULL,
+    detail     TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
