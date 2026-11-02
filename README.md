@@ -19,6 +19,61 @@ PvZ Economy Engine V2.1.2 是一个“看起来在打僵尸，实际上认真做
   -> dashboard.py -> Streamlit PvZ 风格看板
 ```
 
+## 快速开始（3 步）
+
+需要 **Python 3.11**。在仓库根目录执行：
+
+```bash
+# 1. 建虚拟环境并安装依赖
+python -m venv .venv
+# Windows PowerShell: .\.venv\Scripts\Activate.ps1
+# macOS / Linux:   source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+
+# 2. 离线跑通全链路并落库（无需联网）
+python -m src.pipeline --offline --load-db
+
+# 3. 启动界面
+streamlit run app.py
+```
+
+启动后访问 **http://localhost:8501**。第 2 步会把清洗结果幂等写入 SQLite（默认 `data/pvz.db`），后续可直接查询：
+
+```bash
+python -m src.storage.metrics --db data/pvz.db   # SQL 窗口函数指标
+python -m src.storage.query --name 土豆 --days 7  # 某品类最近 7 个交易日
+```
+
+## 架构
+
+```text
+数据源：新发地在线 / 本地 fallback CSV / 用户地区 CSV
+  |
+  v
+[ingest]    src/crawler.py          采集与回退，记录 raw 快照
+  |
+  v
+[clean]     src/preprocess.py       日期 / 菜名 / 单位清洗，统一元/kg
+  |
+  v
+[dq]        src/dq.py               R1-R7 规则，阻断违规落库
+  |
+  v
+[storage]   src/storage/            SQLite 7 表，幂等 upsert
+  |
+  +--> [metrics]   src/storage/metrics.py   SQL 窗口函数指标
+  |
+  +--> [optimizer] src/optimizer.py         PuLP / 贪心 fallback
+  |
+  v
+[Streamlit] app.py                  展示与交互
+```
+
+- **存储层**：清洗结果写入 SQLite（默认 `data/pvz.db`），4 张业务表 + 3 张审计表，详见下文「数据存储层（P0）」。
+- **数据质量**：落库前执行 R1-R7，阻断规则失败时只写 `dq_result` 审计并把运行标记为 `failed`，不写入任何价格。
+- **幂等**：同一 `date_id + commodity_id` 重复写入只更新不重复；重复执行 `python -m src.pipeline --offline --load-db` 不会累积重复行。
+
 ## 项目亮点
 
 - **断网也能种菜**：仓库自带 1,350 条、15 种蔬菜的 CSV。网站偶尔休假没关系，菜园不会跟着停工。

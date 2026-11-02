@@ -9,6 +9,19 @@ from .load import (
 )
 from .queries import recent_avg_price
 
+# Lazy re-export so ``python -m src.storage.metrics`` does not import the
+# module twice (which triggers a runpy RuntimeWarning).
+_LAZY_EXPORTS = {"compute_metrics", "max_consecutive_up_days"}
+
+
+def __getattr__(name: str):
+    if name in _LAZY_EXPORTS:
+        from . import metrics
+
+        return getattr(metrics, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
     "get_conn",
     "init_db",
@@ -17,4 +30,6 @@ __all__ = [
     "record_run",
     "latest_successful_row_count",
     "recent_avg_price",
+    "compute_metrics",
+    "max_consecutive_up_days",
 ]

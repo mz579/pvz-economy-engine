@@ -222,13 +222,13 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertEqual(len(app.sidebar.button), 1)
         self.assertEqual(app.sidebar.button[0].label, "🚀 开始分析")
         self.assertEqual(app.sidebar.button[0].proto.type, "primary")
-        self.assertNotIn("analysis_model", app.session_state.filtered_state)
+        self.assertNotIn("analysis_model", app.session_state)
         self.assertTrue(any("等待作战配置" in item.value for item in app.markdown))
 
         app.sidebar.button[0].click()
         app.run(timeout=30)
         self.assertEqual(len(app.exception), 0)
-        self.assertIn("analysis_model", app.session_state.filtered_state)
+        self.assertIn("analysis_model", app.session_state)
         self.assertEqual(app.session_state["analysis_params"]["available_sun"], 150)
         self.assertEqual(app.session_state["analysis_params"]["available_cells"], 20)
         self.assertFalse(app.session_state["analysis_params"]["uses_uploaded_csv"])
@@ -289,16 +289,21 @@ class StreamlitAppTests(unittest.TestCase):
         app.run(timeout=30)
         original_score = app.session_state["analysis_model"]["result"]["total_score"]
 
+        # A change inside st.form is only staged: rerunning without submitting
+        # must not commit it, so the slider keeps the last submitted value and
+        # the previous analysis result stays untouched.
         app.sidebar.slider[0].set_value(200)
         app.run(timeout=30)
         self.assertEqual(len(app.exception), 0)
-        self.assertEqual(app.sidebar.slider[0].value, 200)
+        self.assertEqual(app.sidebar.slider[0].value, 150)
         self.assertEqual(app.session_state["analysis_params"]["available_sun"], 150)
         self.assertEqual(
             app.session_state["analysis_model"]["result"]["total_score"],
             original_score,
         )
 
+        # Submitting the form together with the staged value commits it.
+        app.sidebar.slider[0].set_value(200)
         app.sidebar.button[0].click()
         app.run(timeout=30)
         self.assertEqual(len(app.exception), 0)
@@ -335,21 +340,22 @@ class StreamlitAppTests(unittest.TestCase):
             self.skipTest("当前 Streamlit 版本不包含 AppTest")
 
         app = app_test.run(timeout=30)
+        self.assertEqual(len(app.exception), 0)
+        self.assertNotIn("analysis_error", app.session_state)
+        self.assertEqual(len(app.error), 0)
+
+        # A file staged inside st.form is only registered when the form is
+        # submitted, so stage the invalid CSV and submit it in the same run.
         app.sidebar.file_uploader[0].upload(
             "invalid.csv",
             b"unexpected\nvalue\n",
             "text/csv",
         )
-        app.run(timeout=30)
-        self.assertEqual(len(app.exception), 0)
-        self.assertNotIn("analysis_error", app.session_state.filtered_state)
-        self.assertEqual(len(app.error), 0)
-
         app.sidebar.button[0].click()
         app.run(timeout=30)
         self.assertEqual(len(app.exception), 0)
         self.assertTrue(app.session_state["analysis_error"])
-        self.assertNotIn("analysis_model", app.session_state.filtered_state)
+        self.assertNotIn("analysis_model", app.session_state)
         self.assertEqual(len(app.error), 1)
 
     def test_partial_user_csv_has_success_and_coverage_states(self) -> None:
@@ -359,8 +365,9 @@ class StreamlitAppTests(unittest.TestCase):
 
         content = (ROOT / "data" / "templates" / "regional_prices_template.csv").read_bytes()
         app = app_test.run(timeout=30)
+        # Upload and submit in one run: a file staged inside st.form only
+        # registers when the form is submitted.
         app.sidebar.file_uploader[0].upload("region.csv", content, "text/csv")
-        app.run(timeout=30)
         app.sidebar.button[0].click()
         app.run(timeout=30)
 
@@ -455,8 +462,9 @@ class StreamlitAppTests(unittest.TestCase):
             "2026-07-13,豌豆,4.12,元/kg\n"
         ).encode("utf-8")
         app = app_test.run(timeout=30)
+        # Upload and submit in one run: a file staged inside st.form only
+        # registers when the form is submitted.
         app.sidebar.file_uploader[0].upload("attack-only.csv", content, "text/csv")
-        app.run(timeout=30)
         app.sidebar.button[0].click()
         app.run(timeout=30)
 
