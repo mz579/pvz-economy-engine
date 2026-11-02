@@ -476,7 +476,10 @@ class StreamlitAppTests(unittest.TestCase):
             "离线 fallback",
             "ceil(格子数 × 30%)",
             "优化结果允许保留空格",
-            "组合相对比较指数为 0.9186",
+            "阳光经济 · 攻防 · 车道 · 昼夜",
+            "0 阳光植物不受此限",
+            "小喷菇 ×14",
+            "昼夜（场景）",
         ):
             with self.subTest(statement=statement):
                 self.assertIn(statement, readme)
