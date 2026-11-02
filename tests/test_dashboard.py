@@ -52,12 +52,13 @@ class DashboardModelTests(unittest.TestCase):
                 self.assertTrue(model["result"]["strategy"])
                 self.assertTrue(model["result"]["all_constraints_met"])
                 self.assertEqual(model["result"]["per_plant_limit"], 6)
-                self.assertTrue(
-                    all(
-                        quantity <= model["result"]["per_plant_limit"]
-                        for quantity in model["result"]["strategy"].values()
+                for item in model["result"]["combination"]:
+                    bound = (
+                        20
+                        if float(item["unit_sun_cost"]) == 0
+                        else model["result"]["per_plant_limit"]
                     )
-                )
+                    self.assertLessEqual(int(item["quantity"]), bound)
                 scores.append(model["result"]["total_score"])
         self.assertGreater(len(set(scores)), 1)
 
@@ -114,7 +115,7 @@ class DashboardModelTests(unittest.TestCase):
             ),
         )
 
-    def test_default_recommendation_respects_concentration_and_keeps_empty_cells(self) -> None:
+    def test_default_recommendation_caps_paid_plants_and_fills_with_free_plants(self) -> None:
         model = build_dashboard_model("均衡巡逻", 150, 20)
         result = model["result"]
 
@@ -122,14 +123,17 @@ class DashboardModelTests(unittest.TestCase):
         self.assertEqual(result["max_plant_share"], 0.30)
         self.assertDictEqual(
             result["strategy"],
-            {"土豆雷": 5, "小喷菇": 6, "灯笼草": 1},
+            {"土豆雷": 5, "小喷菇": 14, "灯笼草": 1},
         )
-        self.assertTrue(all(quantity <= 6 for quantity in result["strategy"].values()))
+        self.assertGreater(result["strategy"]["小喷菇"], 6)
+        for item in result["combination"]:
+            bound = 20 if float(item["unit_sun_cost"]) == 0 else 6
+            self.assertLessEqual(int(item["quantity"]), bound)
         self.assertEqual(result["total_sun_cost"], 150)
-        self.assertEqual(result["total_plants"], 12)
-        self.assertEqual(result["unused_cells"], 8)
-        self.assertAlmostEqual(result["total_score"], 0.9186, places=4)
-        self.assertIn("单植物数量上限", result["unused_cells_reason"])
+        self.assertEqual(result["total_plants"], 20)
+        self.assertEqual(result["unused_cells"], 0)
+        self.assertEqual(result["unused_cells_reason"], "")
+        self.assertAlmostEqual(result["total_score"], 1.1433, places=4)
         self.assertEqual(model["concentration_policy"]["per_plant_limit"], 6)
         self.assertTrue(model["concentration_policy"]["is_v2_assumption"])
 
@@ -246,7 +250,8 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertIn("草坪占用", html)
         self.assertIn("相对比较指数", html)
         self.assertIn("每种植物最多占草坪容量的 30%，本轮最多 6 株", html)
-        self.assertIn("空格不代表错误或不可行", html)
+        self.assertIn("未使用位置会保留为空格，不表示错误或不可行", html)
+        self.assertNotIn("本轮保留", html)
         self.assertIn("reason-points", html)
         self.assertIn("当前价格", html)
         self.assertIn("为什么入选", html)

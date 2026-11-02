@@ -38,6 +38,20 @@ def calculate_per_plant_limit(
     return max(1, math.ceil(available_cells * max_plant_share))
 
 
+def _quantity_cap(
+    sun_cost: float,
+    per_plant_limit: int,
+    available_cells: int,
+) -> int:
+    """Return the upper bound for one plant species.
+
+    Free plants carry positive score at zero sun cost, so they may fill every
+    remaining cell. Paid plants still obey the V2 concentration limit.
+    """
+
+    return available_cells if float(sun_cost) == 0 else per_plant_limit
+
+
 def optimize_planting(
     plants: pd.DataFrame | Sequence[Mapping[str, Any]],
     *,
@@ -232,6 +246,23 @@ def _validate_limits(available_sun: int, available_cells: int) -> None:
         raise ValueError("格子数必须至少为 1")
 
 
+def _new_quantity_variable(
+    problem: Any,
+    index: Any,
+    upper_bound: int,
+) -> Any:
+    """Create one integer quantity variable with a per-species upper bound."""
+
+    name = f"quantity_{index}"
+    if hasattr(problem, "add_variable"):
+        return problem.add_variable(
+            name, lowBound=0, upBound=upper_bound, cat=pl.LpInteger
+        )
+    return pl.LpVariable(  # PuLP 2.x compatibility.
+        name, lowBound=0, upBound=upper_bound, cat=pl.LpInteger
+    )
+
+
 def _solve_with_pulp(
     data: pd.DataFrame,
     available_sun: int,
@@ -243,22 +274,16 @@ def _solve_with_pulp(
 
     problem = pl.LpProblem("PvZ_V2_Planting", pl.LpMaximize)
     indices = data.index.tolist()
-    if hasattr(problem, "add_variable_dicts"):
-        quantities = problem.add_variable_dicts(
-            "quantity",
-            indices,
-            lowBound=0,
-            upBound=per_plant_limit,
-            cat=pl.LpInteger,
+    quantities = {
+        i: _new_quantity_variable(
+            problem,
+            i,
+            _quantity_cap(
+                data.at[i, "sun_cost"], per_plant_limit, available_cells
+            ),
         )
-    else:  # PuLP 2.x compatibility.
-        quantities = pl.LpVariable.dicts(
-            "quantity",
-            indices,
-            lowBound=0,
-            upBound=per_plant_limit,
-            cat=pl.LpInteger,
-        )
+        for i in indices
+    }
 
     problem += pl.lpSum(data.at[i, "_score"] * quantities[i] for i in indices)
     problem += (
@@ -328,13 +353,19 @@ def _solve_greedy(
     used_sun = sum(data.at[i, "sun_cost"] * count for i, count in selected.items())
 
     ranked = sorted(data.index, key=lambda i: _greedy_rank(data.loc[i]), reverse=True)
+    caps = {
+        i: _quantity_cap(
+            data.at[i, "sun_cost"], per_plant_limit, available_cells
+        )
+        for i in data.index
+    }
     while used_cells < available_cells:
         choice = next(
             (
                 i
                 for i in ranked
                 if data.at[i, "_score"] > 0
-                and selected.get(i, 0) < per_plant_limit
+                and selected.get(i, 0) < caps[i]
                 and used_sun + data.at[i, "sun_cost"] <= available_sun
             ),
             None,
@@ -407,7 +438,13 @@ def _build_result(
         "sun_limit": total_sun <= available_sun,
         "cell_limit": total_plants <= available_cells,
         "per_plant_limit": all(
-            int(quantity) <= per_plant_limit for quantity in strategy.values()
+            int(quantity)
+            <= _quantity_cap(
+                indexed.at[name, "sun_cost"],
+                per_plant_limit,
+                available_cells,
+            )
+            for name, quantity in strategy.items()
         ),
         "has_attack": has_attack,
         "has_defense_or_control": has_support,
@@ -415,9 +452,12 @@ def _build_result(
     all_constraints_met = all(checks.values())
 
     unused_cells = max(0, available_cells - total_plants)
+    has_free_filler = bool(
+        ((data["sun_cost"] == 0) & (data["_score"] > 0)).any()
+    )
     unused_cells_reason = (
-        "剩余阳光不足，或候选植物已达到单植物数量上限。"
-        if unused_cells
+        "没有可用的 0 阳光填充植物，付费植物已达到单植物数量上限或剩余阳光不足。"
+        if unused_cells and not has_free_filler
         else ""
     )
 

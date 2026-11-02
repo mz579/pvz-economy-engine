@@ -76,12 +76,13 @@ class PlantingOptimizerTests(unittest.TestCase):
         self.assertGreater(result["total_score"], 0)
         self.assertTrue(result["recommendation_reason"])
         self.assertTrue(result["constraint_checks"]["per_plant_limit"])
-        self.assertTrue(
-            all(
-                int(quantity) <= int(result["per_plant_limit"])
-                for quantity in result["strategy"].values()
+        for item in result["combination"]:
+            bound = (
+                cells
+                if float(item["unit_sun_cost"]) == 0
+                else int(result["per_plant_limit"])
             )
-        )
+            self.assertLessEqual(int(item["quantity"]), bound)
         self.assertEqual(result["max_plant_share"], DEFAULT_MAX_PLANT_SHARE)
 
     def test_pulp_solution_respects_all_constraints(self) -> None:
@@ -152,7 +153,7 @@ class PlantingOptimizerTests(unittest.TestCase):
             with self.subTest(cells=cells):
                 self.assertEqual(calculate_per_plant_limit(cells), limit)
 
-    def test_arbitrarily_named_zero_cost_plant_is_capped_in_both_solvers(self) -> None:
+    def test_zero_cost_plant_can_fill_remaining_cells_in_both_solvers(self) -> None:
         for use_pulp in (True, False):
             with self.subTest(use_pulp=use_pulp):
                 result = optimize_planting(
@@ -162,8 +163,37 @@ class PlantingOptimizerTests(unittest.TestCase):
                     use_pulp=use_pulp,
                 )
                 self.assertEqual(result["per_plant_limit"], 3)
-                self.assertLessEqual(result["strategy"].get("免费攻击D", 0), 3)
+                self.assertGreater(result["strategy"].get("免费攻击D", 0), 3)
+                self.assertEqual(result["total_plants"], 10)
+                self.assertEqual(result["unused_cells"], 0)
                 self.assert_valid_result(result, 25, 10)
+
+    def test_real_150_sun_20_cells_fills_grid_with_free_plants(self) -> None:
+        from src.dashboard import build_dashboard_model
+
+        ranking = build_dashboard_model("均衡巡逻", 150, 20)["ranking"]
+        result = optimize_planting(
+            ranking,
+            available_sun=150,
+            available_cells=20,
+            score_column="apocalypse_index",
+        )
+
+        self.assertEqual(result["total_plants"], 20)
+        self.assertEqual(result["unused_cells"], 0)
+        self.assertEqual(result["unused_cells_reason"], "")
+        self.assertTrue(result["all_constraints_met"])
+        self.assertLessEqual(result["total_sun_cost"], 150)
+        self.assertGreater(result["strategy"]["小喷菇"], 6)
+        paid_quantities = {
+            item["name"]: int(item["quantity"])
+            for item in result["combination"]
+            if float(item["unit_sun_cost"]) > 0
+        }
+        self.assertTrue(paid_quantities)
+        for name, quantity in paid_quantities.items():
+            with self.subTest(plant=name):
+                self.assertLessEqual(quantity, result["per_plant_limit"])
 
     def test_low_cost_plant_and_small_candidate_pool_respect_shared_cap(self) -> None:
         candidates = pd.DataFrame(
