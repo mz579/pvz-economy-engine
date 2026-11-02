@@ -33,19 +33,27 @@ ANALYSIS_MODEL_KEY = "analysis_model"
 ANALYSIS_PARAMS_KEY = "analysis_params"
 ANALYSIS_ERROR_KEY = "analysis_error"
 ZOMBIE_MODE_INPUT_KEY = "zombie_mode_input"
+SCENARIO_INPUT_KEY = "scenario_input"
 AVAILABLE_SUN_INPUT_KEY = "available_sun_input"
 AVAILABLE_CELLS_INPUT_KEY = "available_cells_input"
 DEFAULT_ZOMBIE_MODE = "均衡巡逻"
+DEFAULT_SCENARIO = "day"
 DEFAULT_AVAILABLE_SUN = 150
 DEFAULT_AVAILABLE_CELLS = 20
+SCENARIO_LABELS = {"day": "☀️ 白天", "night": "🌙 夜间"}
 INCOMPLETE_PACKAGE_MESSAGE = "安装包不完整，请重新下载"
 
 
 @st.cache_data(show_spinner=False)
-def get_dashboard_model(mode: str, sun: int, cells: int) -> dict[str, Any]:
+def get_dashboard_model(
+    mode: str,
+    sun: int,
+    cells: int,
+    scenario: str,
+) -> dict[str, Any]:
     """Cache deterministic model results by the visible UI parameters."""
 
-    return build_dashboard_model(mode, sun, cells)
+    return build_dashboard_model(mode, sun, cells, scenario=scenario)
 
 
 @st.cache_data(show_spinner=False)
@@ -53,13 +61,20 @@ def get_uploaded_dashboard_model(
     mode: str,
     sun: int,
     cells: int,
+    scenario: str,
     region_name: str,
     csv_content: bytes,
 ) -> dict[str, Any]:
     """Prepare one uploaded region and calculate its recommendation."""
 
     prices = prepare_uploaded_price_data(csv_content, region_name=region_name)
-    return build_dashboard_model(mode, sun, cells, price_data=prices)
+    return build_dashboard_model(
+        mode,
+        sun,
+        cells,
+        price_data=prices,
+        scenario=scenario,
+    )
 
 
 def load_styles() -> None:
@@ -154,17 +169,24 @@ def build_submitted_dashboard_model(
     zombie_mode: str,
     available_sun: int,
     available_cells: int,
+    scenario: str,
     region_name: str,
     uploaded_file: Any | None,
 ) -> dict[str, Any]:
     """Calculate a model only for an explicit form submission."""
 
     if uploaded_file is None:
-        return get_dashboard_model(zombie_mode, available_sun, available_cells)
+        return get_dashboard_model(
+            zombie_mode,
+            available_sun,
+            available_cells,
+            scenario,
+        )
     return get_uploaded_dashboard_model(
         zombie_mode,
         available_sun,
         available_cells,
+        scenario,
         region_name,
         uploaded_file.getvalue(),
     )
@@ -175,6 +197,7 @@ def reset_sidebar_defaults() -> None:
 
     for key in (
         ZOMBIE_MODE_INPUT_KEY,
+        SCENARIO_INPUT_KEY,
         AVAILABLE_SUN_INPUT_KEY,
         AVAILABLE_CELLS_INPUT_KEY,
     ):
@@ -247,6 +270,9 @@ def render_hero(model: dict[str, Any]) -> None:
 
     mode = model["mode"]
     result = model["result"]
+    scenario_label = SCENARIO_LABELS.get(
+        model.get("scenario", DEFAULT_SCENARIO), DEFAULT_SCENARIO
+    )
     if st.session_state.get(ANALYSIS_ERROR_KEY):
         status_class = "is-warning"
         status_icon = "⚠"
@@ -268,6 +294,7 @@ def render_hero(model: dict[str, Any]) -> None:
           </div>
           <div class="terminal-readout" aria-label="当前分析场景">
             <span><small>当前模式</small><strong>{escape(mode['icon'])} {escape(model['zombie_mode'])}</strong></span>
+            <span><small>当前场景</small><strong>{escape(scenario_label)}</strong></span>
             <span><small>情报来源</small><strong>{escape(model['data_source'])}</strong></span>
             <span><small>数据日期</small><strong>{model['latest_date'].strftime('%Y-%m-%d')}</strong></span>
             <span class="terminal-status {status_class}" role="status">
@@ -785,6 +812,44 @@ def render_market_section(model: dict[str, Any]) -> None:
         )
 
 
+def render_lane_defense(result: dict[str, Any]) -> None:
+    """Show the read-only V3 lane deployment without changing selections."""
+
+    lane_defense = result.get("lane_defense") or {}
+    lanes = lane_defense.get("lanes") or []
+    if not lanes:
+        st.caption("本轮方案未生成车道部署（方案不可行或没有可分配的植物）。")
+        return
+
+    weakest_lane = lane_defense.get("weakest_lane")
+    rows = []
+    for lane in lanes:
+        plants = lane.get("plants") or {}
+        plant_text = "、".join(
+            f"{name}×{count}" for name, count in plants.items()
+        ) or "—"
+        rows.append(
+            {
+                "车道": f"#{lane['lane']}",
+                "占格": f"{lane['cells']} / {lane['capacity']}",
+                "DPS": format_number(lane["dps"], decimals=2),
+                "防御": format_number(lane["defense"], decimals=1),
+                "存活分": format_number(lane["survivability"], decimals=1),
+                "植物": plant_text,
+                "状态": "⚠️ 最弱" if lane["lane"] == weakest_lane else "",
+            }
+        )
+
+    st.dataframe(rows, hide_index=True, **stretch_width(st.dataframe))
+    st.caption(
+        f"共 {lane_defense.get('lanes_count', len(lanes))} 条车道；"
+        f"最弱车道 #{weakest_lane} 的存活分为 "
+        f"{format_number(lane_defense.get('weakest_survivability', 0), decimals=1)}。"
+        "存活分 = DPS × 模拟时长 + 0.1 × 防御；车道分配只用于核对现有选株，"
+        "不会改变各植物数量。"
+    )
+
+
 def render_technical_details(model: dict[str, Any]) -> None:
     """Keep solver, formula, constraints and raw model state below the results."""
 
@@ -836,8 +901,17 @@ def render_technical_details(model: dict[str, Any]) -> None:
     )
 
     with st.expander("模型说明与技术细节"):
-        score_tab, ranking_tab, optimizer_tab, debug_tab = st.tabs(
-            ["📐 评分与权重", "🌿 完整植物排名", "🧩 优化与映射", "🧰 调试信息"]
+        lane_count = int(
+            (result.get("lane_defense") or {}).get("lanes_count", 5)
+        )
+        score_tab, ranking_tab, optimizer_tab, lane_tab, debug_tab = st.tabs(
+            [
+                "📐 评分与权重",
+                "🌿 完整植物排名",
+                "🧩 优化与映射",
+                f"🛡️ 车道部署（{lane_count} 车道）",
+                "🧰 调试信息",
+            ]
         )
         with score_tab:
             st.markdown(
@@ -879,6 +953,7 @@ def render_technical_details(model: dict[str, Any]) -> None:
                 f'<div class="technical-facts">'
                 f'<span><strong>求解方式</strong>{escape(solver_label)}</span>'
                 f'<span><strong>求解器状态</strong>{escape(str(result["status"]))}</span>'
+                f'<span><strong>场景</strong>{escape(SCENARIO_LABELS.get(model.get("scenario", DEFAULT_SCENARIO), DEFAULT_SCENARIO))}</span>'
                 f'<span><strong>菜价来源</strong>{escape(model["data_source"])}</span>'
                 f'<span><strong>数据模式</strong>{escape(model["data_mode"])}</span>'
                 f'<span><strong>数据日期</strong>{model["latest_date"].strftime("%Y-%m-%d")}</span>'
@@ -903,11 +978,17 @@ def render_technical_details(model: dict[str, Any]) -> None:
                 )
             else:
                 st.success("本轮 15 种植物均已映射菜价。")
+        with lane_tab:
+            st.caption(
+                "车道部署由已选植物数量确定性展开，仅用于查看各车道攻防分布。"
+            )
+            render_lane_defense(result)
         with debug_tab:
             st.caption("用于复核本次提交状态；不包含邮箱、路径或其他个人信息。")
             st.json(
                 {
                     "僵尸模式": model["zombie_mode"],
+                    "场景": model.get("scenario", DEFAULT_SCENARIO),
                     "求解状态": result["status"],
                     "求解方式": result["method"],
                     "约束检查": result["constraint_checks"],
@@ -939,6 +1020,15 @@ def main() -> None:
                 options=list(ZOMBIE_MODES),
                 key=ZOMBIE_MODE_INPUT_KEY,
                 help="提交分析后，敌情会调整五项战斗价值权重。",
+            )
+            scenario = st.radio(
+                "场景",
+                options=list(SCENARIO_LABELS),
+                format_func=lambda value: SCENARIO_LABELS[value],
+                index=list(SCENARIO_LABELS).index(DEFAULT_SCENARIO),
+                horizontal=True,
+                key=SCENARIO_INPUT_KEY,
+                help="白天蘑菇休眠且天降阳光；夜间蘑菇可用但没有天降阳光。",
             )
             available_sun = st.slider(
                 "☀️ 可用阳光",
@@ -976,6 +1066,7 @@ def main() -> None:
 
         if (
             zombie_mode != DEFAULT_ZOMBIE_MODE
+            or scenario != DEFAULT_SCENARIO
             or available_sun != DEFAULT_AVAILABLE_SUN
             or available_cells != DEFAULT_AVAILABLE_CELLS
         ):
@@ -994,6 +1085,7 @@ def main() -> None:
                         zombie_mode,
                         available_sun,
                         available_cells,
+                        scenario,
                         region_name,
                         uploaded_file,
                     )
@@ -1005,6 +1097,7 @@ def main() -> None:
                 st.session_state[ANALYSIS_MODEL_KEY] = submitted_model
                 st.session_state[ANALYSIS_PARAMS_KEY] = {
                     "zombie_mode": zombie_mode,
+                    "scenario": scenario,
                     "available_sun": available_sun,
                     "available_cells": available_cells,
                     "region_name": region_name,
