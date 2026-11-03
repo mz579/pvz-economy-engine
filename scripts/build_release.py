@@ -39,7 +39,7 @@ IGNORED_SUFFIXES = {".pyc", ".pyo"}
 def build_release(version: str, output_directory: Path) -> Path:
     """Create a small, reproducible ZIP with code, sample data and launchers."""
 
-    normalized_version = version.strip() or "v2.1.2"
+    normalized_version = version.strip() or "v3.0.0"
     folder_name = f"pvz-economy-engine-{normalized_version}"
     output_directory.mkdir(parents=True, exist_ok=True)
     archive_path = output_directory / f"{folder_name}-portable.zip"
@@ -98,7 +98,7 @@ def _validate_release_archive(archive_path: Path, folder_name: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="构建 PvZ Economy Engine Release ZIP")
-    parser.add_argument("--version", default="v2.1.2")
+    parser.add_argument("--version", default="v3.0.0")
     parser.add_argument("--output", type=Path, default=ROOT / "dist")
     args = parser.parse_args()
     archive = build_release(args.version, args.output)

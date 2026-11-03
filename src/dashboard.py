@@ -13,6 +13,7 @@ from src.pipeline import DEFAULT_PROCESSED_PATH, load_or_build_processed_prices
 from src.plant_mapping import load_plant_mapping
 from src.preprocess import NORMALIZED_PRICE_UNIT
 from src.scoring import apply_weight_multipliers, calculate_apocalypse_scores
+from src.storage.price_source import load_price_features_from_db
 
 
 ZOMBIE_MODES: dict[str, dict[str, Any]] = {
@@ -73,13 +74,21 @@ def build_dashboard_model(
     processed_path: Path | str = DEFAULT_PROCESSED_PATH,
     price_data: pd.DataFrame | None = None,
     scenario: str = "day",
+    data_backend: str = "csv",
+    db_path: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Build the Streamlit model from either processed_path or price_data.
+    """Build the Streamlit model from a price backend or explicit price_data.
 
-    When price_data is provided, processed_path is ignored.  ``scenario`` is
+    When price_data is provided it wins over every backend.  Otherwise
+    ``data_backend="db"`` first tries the SQLite warehouse and silently falls
+    back to the offline CSV when the database is missing or empty; the
+    default ``"csv"`` keeps the original offline behaviour.  ``scenario`` is
     forwarded to the V3 optimizer so the day/night candidate pool and sky sun
     stay consistent with the UI.
     """
+
+    if data_backend not in {"csv", "db"}:
+        raise ValueError(f"未知数据后端: {data_backend}")
 
     if price_data is not None and processed_path != DEFAULT_PROCESSED_PATH:
         warnings.warn(
@@ -91,11 +100,18 @@ def build_dashboard_model(
         raise ValueError(f"未知僵尸模式: {zombie_mode}")
 
     all_plants = load_plant_mapping()
-    prices = (
-        load_offline_prices(processed_path)
-        if price_data is None
-        else _validate_featured_prices(price_data)
-    )
+    data_backend_used = "csv"
+    if price_data is not None:
+        prices = _validate_featured_prices(price_data)
+    elif data_backend == "db":
+        db_prices = load_price_features_from_db(db_path)
+        if db_prices is not None and not db_prices.empty:
+            prices = _validate_featured_prices(db_prices)
+            data_backend_used = "db"
+        else:
+            prices = load_offline_prices(processed_path)
+    else:
+        prices = load_offline_prices(processed_path)
     available_vegetables = set(prices["name"].dropna().astype(str).str.strip())
     plants = all_plants.loc[
         all_plants["vegetable_name"].isin(available_vegetables)
@@ -126,6 +142,11 @@ def build_dashboard_model(
         "xinfadi_official": "北京新发地公开价格",
     }
     data_source = "、".join(_source_label(item, source_labels) for item in sources)
+    if data_backend_used == "db":
+        data_mode = "SQLite 数据库"
+        data_source = f"SQLite 数据库 · {data_source}" if data_source else "SQLite 数据库"
+    else:
+        data_mode = _data_mode_label(sources)
     price_unit = str(prices.attrs.get("price_unit", NORMALIZED_PRICE_UNIT))
     data_days_old = int(prices.attrs.get("data_days_old", 0))
     stale_warning = (
@@ -158,7 +179,8 @@ def build_dashboard_model(
         "reasons": reasons,
         "latest_date": latest_date,
         "data_source": data_source,
-        "data_mode": _data_mode_label(sources),
+        "data_mode": data_mode,
+        "data_backend_used": data_backend_used,
         "price_unit": price_unit,
         "data_days_old": data_days_old,
         "stale_warning": stale_warning,
@@ -201,6 +223,9 @@ def _validate_featured_prices(prices: pd.DataFrame) -> pd.DataFrame:
     result = prices.copy()
     result.attrs["price_unit"] = prices.attrs.get(
         "price_unit", NORMALIZED_PRICE_UNIT
+    )
+    result.attrs["data_days_old"] = int(
+        prices.attrs.get("data_days_old", 0)
     )
     result["date"] = pd.to_datetime(result["date"], errors="coerce")
     if result["date"].isna().all():
