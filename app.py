@@ -1,4 +1,4 @@
-"""PvZ-inspired Streamlit dashboard for the V2.1.2 recommendation system."""
+"""PvZ-inspired Streamlit dashboard for the V3.0.0 recommendation system."""
 
 from __future__ import annotations
 
@@ -105,7 +105,7 @@ def render_incomplete_package_error(missing: tuple[str, ...]) -> None:
     st.error(INCOMPLETE_PACKAGE_MESSAGE)
     st.info(
         "当前程序缺少必要运行文件，无法继续分析。请删除现有解压目录，"
-        "然后从 GitHub Releases 重新下载 v2.1.2 完整便携包。"
+        "然后从 GitHub Releases 重新下载 v3.0.0 完整便携包。"
     )
     if missing:
         st.caption("缺少文件：" + "、".join(missing))
@@ -863,7 +863,11 @@ def render_technical_details(model: dict[str, Any]) -> None:
 
     result = model["result"]
     coverage = model["coverage"]
-    solver_label = "整数规划" if result["method"] == "pulp" else "贪心兜底"
+    solver_label = {
+        "v3-simulation": "v3 确定性模拟",
+        "pulp": "整数规划",
+        "greedy": "贪心兜底",
+    }.get(str(result["method"]), str(result["method"]))
     weight_labels = {
         "attack": "攻击",
         "defense": "防御",
@@ -977,7 +981,7 @@ def render_technical_details(model: dict[str, Any]) -> None:
                 f"{concentration['per_plant_limit']} 株）、至少 1 个攻击植物，以及至少 1 个防御或控制植物。"
             )
             st.caption(
-                "30% 是 V2 的可解释阵容集中度假设，不是现实验证出的最佳比例；优化结果允许保留空格。"
+                "30% 是 V3 的可解释阵容集中度假设，不是现实验证出的最佳比例；优化结果允许保留空格。"
             )
             if coverage["excluded_plants"]:
                 st.info(
