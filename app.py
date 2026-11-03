@@ -53,7 +53,15 @@ def get_dashboard_model(
 ) -> dict[str, Any]:
     """Cache deterministic model results by the visible UI parameters."""
 
-    return build_dashboard_model(mode, sun, cells, scenario=scenario)
+    # Prefer the SQLite warehouse; build_dashboard_model falls back to the
+    # offline CSV when the database is missing or empty.
+    return build_dashboard_model(
+        mode,
+        sun,
+        cells,
+        scenario=scenario,
+        data_backend="db",
+    )
 
 
 @st.cache_data(show_spinner=False)
@@ -1142,6 +1150,12 @@ def main() -> None:
     result = model["result"]
 
     render_hero(model)
+    backend_label = (
+        "SQLite 数据库"
+        if model.get("data_backend_used") == "db"
+        else "离线 CSV"
+    )
+    st.caption(f"数据后端：{backend_label}")
     render_recommendation_summary(model, available_sun, available_cells)
     render_coverage_notice(model)
 
