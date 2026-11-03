@@ -2417,3 +2417,776 @@ textarea:focus-visible,
     transform: none !important;
   }
 }
+
+/* ==========================================================================
+   Atmosphere overlay III — "月夜菜园 · 末日微光"
+   Appended after every previous layer. CSS only: no markup, class name or
+   copy changes. This layer deepens the night scene, unifies the glass cards
+   and adds restrained glow and motion. Decoration is fully disabled under
+   prefers-reduced-motion.
+   ========================================================================== */
+
+:root {
+  --moon: #a9e9ff;
+  --moon-soft: rgba(169, 233, 255, 0.16);
+  --ember: #ffc06b;
+  --ember-soft: rgba(255, 192, 107, 0.14);
+  --aurora-mint: rgba(126, 231, 196, 0.05);
+  --aurora-cyan: rgba(120, 210, 255, 0.045);
+  --glass-edge: rgba(151, 217, 92, 0.3);
+  --glass-edge-warm: rgba(255, 212, 94, 0.45);
+  --glow-moon: 0 0 34px rgba(140, 224, 255, 0.2);
+  --glow-ember: 0 0 30px rgba(255, 192, 107, 0.18);
+  --radius-xl: 18px;
+}
+
+/* --------------------------------------------------------------------------
+   1. Layered night backdrop: moon haze, afterglow, aurora, grid, vignette
+   -------------------------------------------------------------------------- */
+
+.stApp {
+  background-color: #040d09;
+  background-image:
+    radial-gradient(940px 640px at 88% -8%, rgba(140, 224, 255, 0.14), transparent 62%),
+    radial-gradient(520px 420px at 97% 10%, rgba(178, 242, 255, 0.08), transparent 70%),
+    radial-gradient(900px 640px at -8% 108%, rgba(255, 178, 92, 0.13), transparent 64%),
+    radial-gradient(480px 380px at 5% 88%, rgba(255, 206, 128, 0.07), transparent 72%),
+    linear-gradient(rgba(110, 160, 120, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(110, 160, 120, 0.04) 1px, transparent 1px),
+    radial-gradient(140% 105% at 50% 0%, transparent 46%, rgba(1, 5, 3, 0.74) 100%);
+  background-size: auto, auto, auto, auto, 34px 34px, 34px 34px, auto;
+  background-attachment: fixed, fixed, fixed, fixed, scroll, scroll, fixed;
+}
+
+.stApp::before {
+  content: "";
+  display: none;
+  position: fixed;
+  inset: -18%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    linear-gradient(115deg, transparent 28%, rgba(126, 231, 196, 0.06) 43%, rgba(120, 210, 255, 0.055) 55%, transparent 72%),
+    linear-gradient(245deg, transparent 30%, rgba(255, 196, 120, 0.045) 50%, transparent 68%);
+  background-size: 170% 170%, 190% 190%;
+  background-position: 0% 40%, 100% 60%;
+  opacity: 0.9;
+  will-change: transform;
+  animation: aurora-drift 46s ease-in-out infinite alternate;
+}
+
+.stApp::after {
+  content: "";
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.3;
+  background-image: radial-gradient(rgba(220, 255, 236, 0.05) 0.7px, transparent 0.8px);
+  background-size: 3px 3px;
+}
+
+@keyframes aurora-drift {
+  0% {
+    transform: translate3d(-2.5%, -1.5%, 0) rotate(-1.2deg) scale(1.06);
+  }
+  50% {
+    transform: translate3d(1.5%, 1.5%, 0) rotate(0.8deg) scale(1.1);
+  }
+  100% {
+    transform: translate3d(3%, -1%, 0) rotate(-0.8deg) scale(1.06);
+  }
+}
+
+.main .block-container {
+  position: relative;
+  z-index: 1;
+}
+
+/* --------------------------------------------------------------------------
+   2. Hero: larger gradient title, glow lines and a brighter brand block
+   -------------------------------------------------------------------------- */
+
+.terminal-header {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 20px;
+  background:
+    radial-gradient(640px 240px at 14% -40%, rgba(255, 212, 94, 0.16), transparent 70%) padding-box,
+    radial-gradient(520px 220px at 92% -20%, rgba(140, 224, 255, 0.1), transparent 74%) padding-box,
+    linear-gradient(120deg, rgba(24, 54, 37, 0.96), rgba(7, 19, 12, 0.98)) padding-box,
+    linear-gradient(130deg, rgba(255, 212, 94, 0.55), rgba(151, 217, 92, 0.28) 46%, rgba(140, 224, 255, 0.36)) border-box;
+  box-shadow:
+    0 28px 62px rgba(0, 0, 0, 0.44),
+    0 0 42px rgba(151, 217, 92, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.terminal-header::before {
+  height: 2px;
+  opacity: 0.95;
+  background: linear-gradient(90deg, transparent, var(--sun) 20%, var(--growth) 60%, transparent);
+  box-shadow:
+    0 0 18px rgba(255, 212, 94, 0.55),
+    0 0 34px rgba(151, 217, 92, 0.28);
+}
+
+.terminal-header::after {
+  content: "";
+  position: absolute;
+  left: 5%;
+  right: 5%;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 212, 94, 0.55) 30%, rgba(151, 217, 92, 0.5) 64%, transparent);
+  box-shadow: 0 0 16px rgba(255, 212, 94, 0.4);
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.terminal-brand {
+  position: relative;
+  padding: 1rem 1.15rem;
+  border-right-color: rgba(151, 217, 92, 0.22);
+  background: radial-gradient(300px 150px at 0% 55%, rgba(255, 212, 94, 0.09), transparent 74%);
+}
+
+.terminal-brand::before {
+  content: "";
+  position: absolute;
+  top: -30%;
+  left: -24%;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 212, 94, 0.14), transparent 66%);
+  pointer-events: none;
+}
+
+.terminal-brand::after {
+  left: 0.9rem;
+  right: 0.9rem;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 212, 94, 0.75), rgba(151, 217, 92, 0.45), transparent);
+  box-shadow: 0 0 12px rgba(255, 212, 94, 0.45);
+}
+
+.terminal-brand .terminal-kicker {
+  color: var(--sun);
+  letter-spacing: 0.14em;
+  text-shadow: 0 0 14px rgba(255, 212, 94, 0.4);
+}
+
+.terminal-header h1 {
+  font-size: clamp(1.62rem, 3.1vw, 2.3rem);
+  line-height: 1.16;
+  letter-spacing: 0.015em;
+  background: linear-gradient(96deg, #ffe9a6 0%, #ffd45e 26%, #d9ef92 56%, #97d95c 80%, #7fe3b4 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  text-shadow:
+    0 0 24px rgba(255, 212, 94, 0.3),
+    0 0 54px rgba(151, 217, 92, 0.2);
+}
+
+.recommendation-heading h2 {
+  letter-spacing: 0.01em;
+  text-shadow: 0 0 22px rgba(151, 217, 92, 0.16);
+}
+
+/* --------------------------------------------------------------------------
+   3. Metric counters: deeper glass, glowing accent bar, gradient values
+   -------------------------------------------------------------------------- */
+
+.resource-counter {
+  border: 1px solid transparent;
+  border-radius: 16px;
+  background:
+    radial-gradient(170px 90px at 50% -10%, rgba(255, 255, 255, 0.07), transparent 72%) padding-box,
+    linear-gradient(160deg, rgba(26, 58, 40, 0.88), rgba(8, 21, 13, 0.95)) padding-box,
+    linear-gradient(145deg, rgba(151, 217, 92, 0.34), rgba(255, 212, 94, 0.16) 48%, rgba(140, 224, 255, 0.24)) border-box;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 12px 26px rgba(0, 0, 0, 0.26);
+}
+
+.resource-counter::before {
+  height: 3px;
+  box-shadow: 0 0 14px rgba(255, 212, 94, 0.55);
+}
+
+.resource-counter:nth-child(2)::before {
+  box-shadow: 0 0 14px rgba(151, 217, 92, 0.5);
+}
+
+.resource-counter:nth-child(3)::before {
+  box-shadow: 0 0 14px rgba(108, 199, 240, 0.5);
+}
+
+.resource-counter:nth-child(4)::before {
+  box-shadow: 0 0 14px rgba(92, 224, 170, 0.5);
+}
+
+.resource-counter > span {
+  filter: drop-shadow(0 0 9px rgba(255, 212, 94, 0.45));
+}
+
+.resource-counter small {
+  color: var(--text-muted);
+  font-size: 0.59rem;
+  letter-spacing: 0.1em;
+  opacity: 0.85;
+}
+
+.resource-counter strong {
+  font-size: clamp(1.14rem, 1.55vw, 1.42rem);
+  line-height: 1.15;
+  letter-spacing: 0.015em;
+  background: linear-gradient(92deg, #fff8dd 0%, #ffd45e 46%, #b9ed80 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 18px rgba(255, 212, 94, 0.2);
+}
+
+.resource-counter:hover {
+  transform: translateY(-3px);
+  border-color: transparent;
+  box-shadow:
+    0 20px 40px rgba(0, 0, 0, 0.34),
+    0 0 0 1px rgba(255, 212, 94, 0.22),
+    0 0 28px rgba(255, 212, 94, 0.16);
+}
+
+/* --------------------------------------------------------------------------
+   4. Shared glass finish for cards and evidence strips
+   -------------------------------------------------------------------------- */
+
+.recommendation-summary,
+.lawn-panel,
+.waiting-panel,
+.index-explainer,
+.formula-note,
+.chart-state,
+.technical-facts span,
+.intel-strip > span,
+.data-scope > span,
+.reason-card {
+  border: 1px solid transparent;
+  border-radius: 16px;
+  background:
+    radial-gradient(320px 160px at 100% 0%, rgba(151, 217, 92, 0.07), transparent 72%) padding-box,
+    linear-gradient(160deg, rgba(22, 49, 33, 0.82), rgba(8, 21, 13, 0.92)) padding-box,
+    linear-gradient(145deg, rgba(151, 217, 92, 0.3), rgba(255, 212, 94, 0.12) 48%, rgba(140, 224, 255, 0.2)) border-box;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 14px 32px rgba(0, 0, 0, 0.24);
+  transition:
+    box-shadow var(--ease),
+    transform var(--ease);
+}
+
+.recommendation-summary {
+  border-left: 4px solid var(--success);
+}
+
+.recommendation-summary.is-infeasible {
+  border-left-color: var(--error);
+}
+
+.lawn-panel,
+.waiting-panel {
+  border-radius: var(--radius-xl);
+}
+
+.reason-card {
+  border-left: 4px solid var(--growth);
+}
+
+.intel-strip > span {
+  border-radius: 14px;
+  border-top: 3px solid var(--intel);
+}
+
+.data-scope > span {
+  border-radius: 14px;
+  border-top: 3px solid rgba(151, 217, 92, 0.55);
+}
+
+.technical-facts span,
+.index-explainer {
+  border-radius: 14px;
+}
+
+.recommendation-summary:hover,
+.lawn-panel:hover,
+.reason-card:hover,
+.intel-strip > span:hover,
+.data-scope > span:hover {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 20px 42px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(151, 217, 92, 0.34),
+    0 0 30px rgba(151, 217, 92, 0.12);
+}
+
+.reason-card:hover {
+  transform: translateY(-3px);
+  border-color: transparent;
+  border-left-color: var(--growth);
+}
+
+.intel-strip > span:hover {
+  border-color: transparent;
+  border-top-color: var(--intel);
+}
+
+.data-scope > span:hover {
+  border-color: transparent;
+  border-top-color: rgba(151, 217, 92, 0.55);
+}
+
+/* --------------------------------------------------------------------------
+   5. Roster parchment keeps its light contrast, gains depth and a warm edge
+   -------------------------------------------------------------------------- */
+
+.roster-sheet {
+  border: 1px solid #d7cea6;
+  border-left: 4px solid var(--sun);
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(360px 200px at 0% 0%, rgba(255, 255, 255, 0.62), transparent 70%),
+    linear-gradient(160deg, #faf6e3, #e8e0bd);
+  box-shadow:
+    0 24px 50px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.78),
+    0 0 0 1px rgba(255, 212, 94, 0.12);
+  transition: box-shadow var(--ease);
+}
+
+.roster-sheet:hover {
+  box-shadow:
+    0 28px 58px rgba(0, 0, 0, 0.44),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 0 0 1px rgba(214, 178, 76, 0.5),
+    0 0 26px rgba(255, 212, 94, 0.14);
+}
+
+.roster-sheet > header {
+  border-bottom-color: #d2c89f;
+  letter-spacing: 0.06em;
+}
+
+/* --------------------------------------------------------------------------
+   6. Lawn: striped turf, dew highlights, soil depth and plant glow
+   -------------------------------------------------------------------------- */
+
+.lawn-board {
+  gap: 5px;
+  border: 7px solid #5b3e2a;
+  border-radius: 16px;
+  background:
+    radial-gradient(130% 84% at 50% -12%, rgba(196, 255, 205, 0.18), transparent 64%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.03) 0 2px, transparent 2px 9px),
+    repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.1) 0 16%, rgba(0, 0, 0, 0.02) 16% 32%),
+    linear-gradient(160deg, #356238, #18321e);
+  box-shadow:
+    inset 0 0 0 1px rgba(154, 116, 84, 0.72),
+    inset 0 10px 26px rgba(0, 0, 0, 0.46),
+    inset 0 -12px 26px rgba(0, 0, 0, 0.36),
+    0 18px 40px rgba(0, 0, 0, 0.36);
+}
+
+.lawn-cell {
+  min-height: 48px;
+  border-color: rgba(220, 248, 214, 0.16);
+  border-radius: 8px;
+  background:
+    radial-gradient(120% 90% at 28% 6%, rgba(255, 255, 255, 0.11), transparent 58%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.028) 0 1px, transparent 1px 4px),
+    linear-gradient(135deg, #4a7a37, #2b5129);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -8px 14px rgba(0, 0, 0, 0.18);
+  transition:
+    transform var(--ease),
+    box-shadow var(--ease),
+    border-color var(--ease),
+    filter var(--ease);
+}
+
+.lawn-cell:nth-child(even) {
+  background:
+    radial-gradient(120% 90% at 28% 6%, rgba(255, 255, 255, 0.1), transparent 58%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.026) 0 1px, transparent 1px 4px),
+    linear-gradient(135deg, #528339, #2f582c);
+}
+
+.lawn-cell:hover {
+  filter: brightness(1.12) saturate(1.05);
+  border-color: rgba(255, 212, 94, 0.42);
+}
+
+.lawn-cell.is-occupied {
+  border-color: rgba(255, 212, 94, 0.44);
+  box-shadow:
+    inset 0 0 24px rgba(151, 217, 92, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 0 18px rgba(151, 217, 92, 0.2),
+    0 0 34px rgba(255, 212, 94, 0.1);
+}
+
+.lawn-cell.is-occupied span {
+  filter:
+    drop-shadow(0 0 9px rgba(255, 212, 94, 0.55))
+    drop-shadow(0 3px 5px rgba(0, 0, 0, 0.42));
+}
+
+.lawn-cell.is-occupied:hover {
+  position: relative;
+  z-index: 1;
+  transform: translateY(-2px) scale(1.045);
+  border-color: rgba(255, 212, 94, 0.72);
+  box-shadow:
+    inset 0 0 26px rgba(151, 217, 92, 0.36),
+    0 0 24px rgba(255, 212, 94, 0.26),
+    0 0 46px rgba(151, 217, 92, 0.16);
+}
+
+.lawn-cell.is-empty {
+  opacity: 1;
+  border-style: dashed;
+  border-color: rgba(230, 244, 225, 0.15);
+  background:
+    radial-gradient(110% 80% at 30% 10%, rgba(255, 255, 255, 0.04), transparent 60%),
+    linear-gradient(135deg, rgba(66, 100, 62, 0.62), rgba(26, 52, 30, 0.8));
+  box-shadow: inset 0 0 18px rgba(0, 0, 0, 0.26);
+}
+
+.lawn-cell.is-empty span,
+.lawn-cell.is-empty small {
+  color: #bdd0b7;
+}
+
+.lawn-cell.is-empty:hover {
+  filter: brightness(1.08);
+  border-color: rgba(230, 244, 225, 0.3);
+}
+
+/* --------------------------------------------------------------------------
+   7. Buttons: golden primary with a soft breathing halo, glass secondary
+   -------------------------------------------------------------------------- */
+
+[data-testid="stFormSubmitButton"] button,
+button[kind="primary"] {
+  position: relative;
+  border: 1px solid #ffeeb0;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #ffe796 0%, #ffd45e 44%, #e9ae2e 100%);
+  color: #2a220a !important;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+  box-shadow:
+    0 14px 30px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 0 22px rgba(255, 212, 94, 0.2);
+  transition:
+    transform var(--ease),
+    box-shadow var(--ease),
+    filter var(--ease);
+}
+
+[data-testid="stFormSubmitButton"] button::after,
+button[kind="primary"]::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 1px rgba(255, 236, 170, 0.5),
+    0 0 26px rgba(255, 212, 94, 0.32);
+  opacity: 0.45;
+  animation: sun-breathe 5.2s ease-in-out infinite;
+}
+
+@keyframes sun-breathe {
+  0%, 100% {
+    opacity: 0.38;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+[data-testid="stFormSubmitButton"] button:hover,
+button[kind="primary"]:hover {
+  transform: translateY(-2px);
+  border-color: #fff6cc;
+  background: linear-gradient(135deg, #fff0b0 0%, #ffdd76 44%, #f3bd44 100%);
+  box-shadow:
+    0 20px 40px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 0 42px rgba(255, 212, 94, 0.44);
+}
+
+[data-testid="stFormSubmitButton"] button:active,
+button[kind="primary"]:active {
+  transform: translateY(0);
+  filter: brightness(0.97);
+}
+
+[data-testid="stSidebar"] [data-testid="stButton"] button,
+[data-testid="stSidebar"] [data-testid="stDownloadButton"] button {
+  border: 1px solid rgba(151, 217, 92, 0.3);
+  border-radius: 12px;
+  background:
+    radial-gradient(140px 70px at 50% -20%, rgba(255, 255, 255, 0.07), transparent 72%),
+    linear-gradient(160deg, rgba(26, 58, 40, 0.84), rgba(8, 21, 13, 0.92));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 8px 18px rgba(0, 0, 0, 0.22);
+  transition:
+    border-color var(--ease),
+    transform var(--ease),
+    box-shadow var(--ease);
+}
+
+[data-testid="stSidebar"] [data-testid="stButton"] button:hover,
+[data-testid="stSidebar"] [data-testid="stDownloadButton"] button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 212, 94, 0.5);
+  box-shadow:
+    0 12px 24px rgba(0, 0, 0, 0.28),
+    0 0 22px rgba(255, 212, 94, 0.14);
+}
+
+/* --------------------------------------------------------------------------
+   8. Section headings: glowing rail and wider tracking
+   -------------------------------------------------------------------------- */
+
+.section-heading {
+  padding-left: 1rem;
+}
+
+.section-heading::before {
+  top: 0.3rem;
+  bottom: 0.35rem;
+  width: 4px;
+  background: linear-gradient(180deg, var(--sun), var(--growth) 55%, var(--success));
+  box-shadow:
+    0 0 16px rgba(255, 212, 94, 0.55),
+    0 0 34px rgba(151, 217, 92, 0.24);
+}
+
+.section-heading h2 {
+  letter-spacing: 0.02em;
+  text-shadow: 0 0 24px rgba(151, 217, 92, 0.14);
+}
+
+.section-heading .section-kicker {
+  color: var(--sun);
+  letter-spacing: 0.16em;
+  text-shadow: 0 0 14px rgba(255, 212, 94, 0.35);
+}
+
+/* --------------------------------------------------------------------------
+   9. Streamlit details: tabs, data frame, focus ring and scrollbars
+   -------------------------------------------------------------------------- */
+
+[data-testid="stTabs"] [role="tab"] {
+  position: relative;
+}
+
+[data-testid="stTabs"] [aria-selected="true"] {
+  background: linear-gradient(160deg, rgba(255, 212, 94, 0.2), rgba(151, 217, 92, 0.1));
+  box-shadow:
+    inset 0 -2px 0 var(--sun),
+    0 8px 20px rgba(0, 0, 0, 0.24),
+    0 0 20px rgba(255, 212, 94, 0.18);
+}
+
+[data-testid="stTabs"] [aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 16%;
+  right: 16%;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--sun) 50%, transparent);
+  box-shadow: 0 0 12px rgba(255, 212, 94, 0.85);
+  pointer-events: none;
+}
+
+[data-testid="stDataFrame"] {
+  border: 1px solid rgba(151, 217, 92, 0.24);
+  border-top: 3px solid rgba(151, 217, 92, 0.4);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(17, 37, 24, 0.94), rgba(7, 18, 12, 0.97));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 16px 34px rgba(0, 0, 0, 0.26);
+}
+
+[data-testid="stDataFrame"]:hover {
+  border-color: rgba(255, 212, 94, 0.38);
+  border-top-color: rgba(255, 212, 94, 0.5);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 18px 38px rgba(0, 0, 0, 0.3),
+    0 0 26px rgba(255, 212, 94, 0.1);
+}
+
+[data-testid="stExpander"] {
+  border-color: rgba(151, 217, 92, 0.24);
+  border-radius: 16px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 16px 34px rgba(0, 0, 0, 0.22);
+}
+
+[data-testid="stExpander"] summary:hover {
+  background: rgba(255, 212, 94, 0.06);
+}
+
+::selection {
+  background: rgba(255, 212, 94, 0.55);
+  color: #1a1405;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role="tab"]:focus-visible,
+[role="slider"]:focus-visible,
+[role="combobox"]:focus-visible,
+summary:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 6px;
+  box-shadow:
+    0 0 0 5px rgba(10, 14, 8, 0.6),
+    0 0 0 9px rgba(255, 212, 94, 0.14);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #4a4324 transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #6d5a2a, #3d4630) padding-box;
+  box-shadow: inset 0 0 0 1px rgba(255, 212, 94, 0.12);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #8d7634, #4e5a3c) padding-box;
+}
+
+/* Gradient-text fallback for environments without background-clip. */
+@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
+  .resource-counter strong {
+    background: none;
+    color: var(--text);
+    -webkit-text-fill-color: currentColor;
+    text-shadow: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   10. Responsive re-tightening for the appended layer
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 980px) {
+  .terminal-header {
+    border-radius: 16px;
+  }
+}
+
+@media (max-width: 620px) {
+  .terminal-header {
+    border-radius: 14px;
+  }
+
+  .terminal-header h1 {
+    font-size: clamp(1.38rem, 8vw, 1.8rem);
+  }
+
+  .resource-counter {
+    border-radius: 13px;
+  }
+
+  .resource-counter strong {
+    font-size: 1.06rem;
+  }
+
+  .recommendation-summary,
+  .roster-sheet,
+  .lawn-panel,
+  .reason-card,
+  .waiting-panel,
+  .index-explainer {
+    border-radius: 14px;
+  }
+
+  .lawn-board {
+    gap: 3px;
+    border-width: 5px;
+    border-radius: 13px;
+  }
+
+  .lawn-cell {
+    min-height: 43px;
+    border-radius: 6px;
+  }
+
+  .section-heading {
+    padding-left: 0.7rem;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   11. Reduced motion: stop the aurora and the button breathing
+   -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .stApp::before,
+  .stApp::after {
+    animation: none !important;
+  }
+
+  [data-testid="stFormSubmitButton"] button::after,
+  button[kind="primary"]::after {
+    animation: none !important;
+    opacity: 0.45;
+  }
+
+  .resource-counter:hover,
+  .reason-card:hover,
+  .lawn-cell:hover,
+  .lawn-cell.is-occupied:hover,
+  .recommendation-summary:hover,
+  .lawn-panel:hover,
+  [data-testid="stSidebar"] [data-testid="stButton"] button:hover,
+  [data-testid="stSidebar"] [data-testid="stDownloadButton"] button:hover,
+  [data-testid="stFormSubmitButton"] button:hover,
+  button[kind="primary"]:hover {
+    transform: none !important;
+  }
+}
