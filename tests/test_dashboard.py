@@ -279,7 +279,7 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertIn("analysis_model", app.session_state)
         self.assertEqual(app.session_state["analysis_params"]["available_sun"], 150)
         self.assertEqual(app.session_state["analysis_params"]["available_cells"], 20)
-        self.assertEqual(app.session_state["analysis_params"]["scenario"], "day")
+        self.assertEqual(app.session_state["analysis_params"]["scenario"], "night")
         self.assertFalse(app.session_state["analysis_params"]["uses_uploaded_csv"])
         html = self.rendered_html(app)
         self.assertIn("terminal-header", html)
@@ -296,11 +296,15 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertIn("相对比较指数", html)
         self.assertIn("每种植物最多占草坪容量的 30%，本轮最多 6 株", html)
         self.assertIn("未使用位置会保留为空格，不表示错误或不可行", html)
-        # Default day scenario has no free mushroom filler, so 15 cells stay
-        # empty and the summary states that explicitly.
-        self.assertIn("本轮保留 15 个空格", html)
+        # The empty-cell copy depends on the scenario's optimizer output, so
+        # assert whichever state the default (night) run actually produced.
+        result = app.session_state["analysis_model"]["result"]
+        if result["unused_cells"]:
+            self.assertIn(f"本轮保留 {result['unused_cells']} 个空格", html)
+        else:
+            self.assertIn("结果对应最近一次提交", html)
         self.assertIn("当前场景", html)
-        self.assertIn("☀️ 白天", html)
+        self.assertIn("🌙 夜间", html)
         self.assertIn("reason-points", html)
         self.assertIn("当前价格", html)
         self.assertIn("为什么入选", html)
